@@ -26,3 +26,14 @@ node_modules/
 tax-calculator/.env
 order-syncer/.env
 .env
+.env.local
+.idea
+.cm
+.DS_Store
+
+# AI Generated Files
+.claude
+CLAUDE.md
+commercetools-key.json
+.superdesign
+.cursor
