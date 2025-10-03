@@ -1,9 +1,10 @@
 import { Router } from 'express';
 
-import { syncHandler } from '../controllers/sync.controller.js';
+import { syncHandler, syncRawHandler } from '../controllers/sync.controller.js';
 
 const syncRouter = Router();
 
 syncRouter.post('/orderSyncer', syncHandler);
+syncRouter.post('/', syncRawHandler);
 
 export default syncRouter;

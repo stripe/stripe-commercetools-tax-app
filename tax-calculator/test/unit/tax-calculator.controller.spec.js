@@ -1,6 +1,6 @@
 import {expect, describe, it, jest} from '@jest/globals';
 import configUtil from '../../src/utils/config.util.js';
-import { HTTP_STATUS_SUCCESS_ACCEPTED } from '../../src/constants/http.status.constants.js';
+import { HTTP_STATUS_BAD_REQUEST } from '../../src/constants/http.status.constants.js';
 import {taxHandler} from "../../src/controllers/tax.calculator.controller.js";
 
 describe('tax-calculator.controller.spec', () => {
@@ -34,7 +34,7 @@ describe('tax-calculator.controller.spec', () => {
 
     const responseStatusSpy = jest.spyOn(mockResponse, 'status')
     await taxHandler(mockRequest, mockResponse);
-    expect(responseStatusSpy).toBeCalledWith(HTTP_STATUS_SUCCESS_ACCEPTED);
+    expect(responseStatusSpy).toBeCalledWith(HTTP_STATUS_BAD_REQUEST);
   });
 
 });

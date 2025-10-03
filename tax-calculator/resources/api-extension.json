@@ -7,7 +7,7 @@
   "triggers": [
     {
       "resourceTypeId": "cart",
-      "actions": ["Update"],
+      "actions": ["Update", "Create"],
       "condition": "taxMode=\"ExternalAmount\" and cartState=\"Frozen\""
     }
   ],

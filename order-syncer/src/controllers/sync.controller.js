@@ -35,6 +35,7 @@ async function syncToTaxProvider(orderId, cart) {
 export const syncHandler = async (request, response) => {
   try {
     // Receive the Pub/Sub message
+    logger.info(`Received Pub/Sub syncHandler message: ${JSON.stringify(request.body,null,2)}`);
     const encodedMessageBody = request.body?.message?.data;
     if (!encodedMessageBody) {
       throw new CustomError(
@@ -44,6 +45,38 @@ export const syncHandler = async (request, response) => {
     }
 
     const messageBody = decodeToJson(encodedMessageBody);
+    doValidation(messageBody);
+
+    const orderId = messageBody?.resource?.id;
+    const cart = await getCartByOrderId(orderId);
+    if (cart) {
+      await syncToTaxProvider(orderId, cart);
+    }
+  } catch (err) {
+    logger.error(err);
+    if (err.statusCode) return response.status(err.statusCode).send(err);
+    return response.status(HTTP_STATUS_SERVER_ERROR).send(err);
+  }
+
+  // Return the response for the client
+  return response.status(HTTP_STATUS_SUCCESS_NO_CONTENT).send();
+};
+
+
+export const syncRawHandler = async (request, response) => {
+  try {
+    // Receive the Pub/Sub message
+    logger.info(`Received Pub/Sub syncRawHandler message: ${JSON.stringify(request.body,null,2)}`);
+    const encodedMessageBody = request.body?.message?.data;
+    if (!encodedMessageBody) {
+      throw new CustomError(
+        HTTP_STATUS_SUCCESS_ACCEPTED,
+        'Missing message data from incoming event message.'
+      );
+    }
+
+    const messageBody = decodeToJson(encodedMessageBody);
+    logger.info(`Decoded message body: ${JSON.stringify(messageBody,null,2)}`);
     doValidation(messageBody);
 
     const orderId = messageBody?.resource?.id;

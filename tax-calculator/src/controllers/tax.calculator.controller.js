@@ -9,12 +9,14 @@ import {
 
 import CustomError from '../errors/custom.error.js';
 import configUtils from '../utils/config.util.js';
+import { validateCartAddress } from '../validators/address.validator.js';
 
 const CTP_TYPE_TAX_TXN_KEY = 'stripe-tax';
 
 export const taxHandler = async (request, response) => {
     let calculation;
 
+    logger.info(`request body: ${JSON.stringify(request.body)}`);
     logger.info(`request body: ${JSON.stringify(request.body)}`);
     const cartRequestBody = request.body?.resource?.obj;
     if (_.isEmpty(cartRequestBody)) {
@@ -27,13 +29,14 @@ export const taxHandler = async (request, response) => {
                 )
             );
     }
-
+    logger.info(`Cart request body: ${JSON.stringify(cartRequestBody,null,2)}`);
     const taxRequest = mapCartRequestToTaxRequest(cartRequestBody);
     let actionItems;
     try {
+        logger.info(`Tax request to Stripe: ${JSON.stringify(taxRequest,null,2)}`);
         const stripeInstance = new stripe(configUtils.readConfiguration().stripeApiToken);
         calculation = await stripeInstance.tax.calculations.create(taxRequest);
-
+        logger.info(`Tax calculation from Stripe2: ${JSON.stringify(calculation,null,2)}`);
         actionItems = await addUpdateCartLineItems(cartRequestBody.id, calculation);
     } catch (err) {
         logger.error(err);
@@ -73,7 +76,7 @@ async function addUpdateCartLineItems(cartId, calculation) {
                 },
                 taxRate: {
                     name: taxRateDetails?.tax_type,
-                    amount: parseFloat(taxRateDetails?.percentage_decimal),
+                    amount: parseFloat(taxRateDetails?.percentage_decimal/100),
                     country: taxRateDetails?.country
                 }
             }
@@ -86,8 +89,7 @@ async function addUpdateCartLineItems(cartId, calculation) {
 function mapCartRequestToTaxRequest(cartRequest) {
     let taxRequest = {customer_details: {address: {}}, line_items: []};
 
-    taxRequest.currency = cartRequest.totalPrice?.currencyCode;
-    taxRequest.customer_details.address.country = cartRequest.country;
+    
 
     let cartShippingAddress = {};
     if(cartRequest.shippingMode === 'Single'){
@@ -95,8 +97,13 @@ function mapCartRequestToTaxRequest(cartRequest) {
     } else {
         cartShippingAddress = cartRequest.shipping[0]?.shippingAddress;
     }
-    taxRequest.customer_details.address.postal_code = cartShippingAddress.postal_code;
+
+    taxRequest.currency = cartRequest.totalPrice?.currencyCode;
+    taxRequest.customer_details.address.country = cartRequest.country;
+    taxRequest.customer_details.address.postal_code = cartShippingAddress.postalCode;
     taxRequest.customer_details.address.line1 = cartShippingAddress.streetName;
+    taxRequest.customer_details.address.city = cartShippingAddress.city;
+    taxRequest.customer_details.address.state = cartShippingAddress.state;
     taxRequest.customer_details.address_source = 'shipping';
 
     for (const cartLineItem of cartRequest.lineItems) {
@@ -104,6 +111,7 @@ function mapCartRequestToTaxRequest(cartRequest) {
         let lineItemData = {};
         lineItemData.amount = cartLineItem.totalPrice?.centAmount;
         lineItemData.reference = cartLineItem.id;
+        lineItemData.tax_code = "txcd_99999999";
 
         taxRequest.line_items.push(lineItemData);
     }

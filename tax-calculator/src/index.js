@@ -7,7 +7,7 @@ import bodyParser from 'body-parser';
 import taxCalculatorRouter from './routes/tax.calculator.route.js';
 import { logger } from './utils/logger.utils.js';
 
-const PORT = 8080;
+const PORT = 8081;
 
 // Create the express app
 const app = express();

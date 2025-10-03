@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 import { createApiRoot } from '../clients/create.client.js';
 import { deleteCTPExtension } from './action.js';
 import { CTP_TAX_CALCULATOR_EXTENSION_KEY } from './constants.js';

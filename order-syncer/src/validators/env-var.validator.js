@@ -50,6 +50,16 @@ const envValidators = [
     message: 'Not a valid region.',
     referencedBy: 'environmentVariables',
   }),
+
+  standardString(
+    ['stripeApiToken'],
+    {
+      code: 'InvalidStripeApiToken',
+      message: 'Stripe API token should be a valid string.',
+      referencedBy: 'environmentVariables',
+    },
+    { min: 1, max: undefined }
+  ),
 ];
 
 export default envValidators;

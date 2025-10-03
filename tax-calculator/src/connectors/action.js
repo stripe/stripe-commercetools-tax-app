@@ -9,6 +9,11 @@ export async function createCTPExtension(
   ctpExtensionBaseUrl
 ) {
   try {
+    // This code creates an "extensionDraft" object by first converting the imported JSON template (extensionTemplate)
+    // into a string, then using lodash's template function to replace placeholders in the string with the provided
+    // values (ctpTaxCalculatorExtensionKey and ctpExtensionBaseUrl). The result is a string with the placeholders
+    // replaced, which is then parsed back into a JavaScript object using JSON.parse.
+    // This allows dynamic insertion of runtime values into a static JSON template.
     const extensionDraft = JSON.parse(
       _.template(JSON.stringify(extensionTemplate))({
         ctpTaxCalculatorExtensionKey,

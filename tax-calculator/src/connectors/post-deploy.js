@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 import { createApiRoot } from '../clients/create.client.js';
 import { createCTPExtension } from './action.js';
 import {
