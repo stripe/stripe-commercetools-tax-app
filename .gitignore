@@ -28,7 +28,6 @@ order-syncer/.env
 .env
 .env.local
 .idea
-.cm
 .DS_Store
 
 # AI Generated Files
