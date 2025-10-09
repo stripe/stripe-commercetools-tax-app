@@ -38,3 +38,4 @@ commercetools-key.json
 .cursor
 .specify
 specs
+context/sessions
