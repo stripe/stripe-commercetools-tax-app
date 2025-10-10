@@ -3,7 +3,7 @@ import request from 'supertest';
 import server from '../../src/index.js';
 import {HTTP_STATUS_BAD_REQUEST, HTTP_STATUS_SUCCESS_ACCEPTED} from '../../src/constants/http.status.constants.js';
 import { createApiRoot } from "../../src/clients/create.client.js";
-import cartRequestPayload from "./../../resources/cartRequest.json" assert { type: 'json' };
+import cartRequestPayload from "./../../resources/cartRequest.json" with { type: 'json' };
 
 /** Reminder : Please put mandatory environment variables in the settings of your github repository **/
 describe('Test tax-calculator.controller.js', () => {

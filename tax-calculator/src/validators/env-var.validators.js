@@ -3,7 +3,6 @@ import {
   standardString,
   standardKey,
   region,
-  stripeApiToken,
 } from './helpers.validators.js';
 
 /**
@@ -51,22 +50,6 @@ const envValidators = [
     message: 'Not a valid region.',
     referencedBy: 'environmentVariables',
   }),
-
-  stripeApiToken(['stripeApiToken'], {
-    code: 'InvalidStripeApiToken',
-    message: 'Stripe API token must start with sk_test_ or sk_live_.',
-    referencedBy: 'environmentVariables',
-  }),
-
-  optional(standardString)(
-    ['stripeConnectedAccountId'],
-    {
-      code: 'InvalidStripeConnectedAccountId',
-      message: 'Stripe Connected Account ID should be at least 2 characters long.',
-      referencedBy: 'environmentVariables',
-    },
-    { min: 2, max: undefined }
-  ),
 ];
 
 export default envValidators;

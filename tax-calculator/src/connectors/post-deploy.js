@@ -9,6 +9,14 @@ import {
   CTP_TAX_CALCULATOR_EXTENSION_KEY,
 } from './constants.js';
 
+/**
+ * Post-deployment function that validates Stripe Tax configuration and creates the commercetools extension.
+ * This function is called after the connector is deployed to ensure proper setup and configuration.
+ * 
+ * @param {Map} properties - Map containing environment variables and configuration properties
+ * @throws {Error} When required properties are missing or validation/creation fails
+ * @returns {Promise<void>} Resolves when post-deploy process completes successfully
+ */
 async function postDeploy(properties) {
   const ctpExtensionBaseUrl = properties.get(CONNECT_SERVICE_URL);
   const stripeApiToken = properties.get('TAX_PROVIDER_API_TOKEN');
@@ -22,36 +30,21 @@ async function postDeploy(properties) {
     throw new Error('CONNECT_SERVICE_URL is required for extension creation');
   }
 
-  try {
-    logger.info('Starting post-deploy process...');
+  logger.info('Starting post-deploy process...');
+  logger.info('Validating Stripe Tax configuration...');
+  await validateStripeTax(stripeApiToken);
 
-    // Step 1: Validate Stripe Tax settings BEFORE creating extension
-    logger.info('Step 1: Validating Stripe Tax configuration...');
-    await validateStripeTax(stripeApiToken);
+  logger.info('Creating commercetools extension...');
+  const apiRoot = createApiRoot();
+  await createCTPExtension(
+    apiRoot,
+    CTP_TAX_CALCULATOR_EXTENSION_KEY,
+    ctpExtensionBaseUrl
+  );
 
-    // Step 2: Create commercetools API extension
-    logger.info('Step 2: Creating commercetools extension...');
-    const apiRoot = createApiRoot();
-    await createCTPExtension(
-      apiRoot,
-      CTP_TAX_CALCULATOR_EXTENSION_KEY,
-      ctpExtensionBaseUrl
-    );
+  logger.info('Post-deploy completed successfully');
+  logger.info('Stripe Tax connector is ready for tax calculations');
 
-    logger.info('Post-deploy completed successfully');
-    logger.info('Stripe Tax connector is ready for tax calculations');
-
-  } catch (error) {
-    logger.error('Post-deploy failed:', error.message);
-    logger.error('Troubleshooting tips:');
-    logger.error('   - Verify Stripe Tax is enabled in your Stripe Dashboard');
-    logger.error('   - Check that your API key has Tax permissions');
-    logger.error('   - Ensure head office address is configured');
-    logger.error('   - Visit: https://dashboard.stripe.com/tax/settings');
-    
-    // Exit with error code 1 to fail deployment
-    process.exit(1);
-  }
 }
 
 async function run() {
@@ -59,7 +52,7 @@ async function run() {
     const properties = new Map(Object.entries(process.env));
     await postDeploy(properties);
   } catch (error) {
-    process.stderr.write(`Post-deploy failed: ${error.message}\n`);
+    logger.error('Post-deploy failed', { error: error.message, stack: error.stack });
     process.exitCode = 1;
   }
 }

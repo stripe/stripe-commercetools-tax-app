@@ -139,13 +139,3 @@ export const region = (path, message) => [
     ],
   ],
 ];
-
-export const stripeApiToken = (path, message) => [
-  path,
-  [
-    [
-      required((value) => /^sk_(test|live)_/.test(value)),
-      message,
-    ],
-  ],
-];

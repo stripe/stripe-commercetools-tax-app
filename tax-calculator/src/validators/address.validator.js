@@ -1,5 +1,4 @@
 import validator from 'validator';
-import { getValidateMessages } from './helpers.validators.js';
 
 const COUNTRY_ADDRESS_REQUIREMENTS = {
     US: {
@@ -109,8 +108,6 @@ export const validateAddress = (address) => {
 };
 
 export const validateCartAddress = (cartRequest) => {
-    const errors = [];
-
     if (!cartRequest) {
         return [{ code: 'MISSING_CART', message: 'Cart request is required' }];
     }

@@ -1,7 +1,7 @@
 import _ from 'lodash';
 import { serializeError } from 'serialize-error';
 import { logger } from '../utils/logger.utils.js';
-import extensionTemplate from "./../../resources/api-extension.json" assert { type: 'json' };
+import extensionTemplate from "./../../resources/api-extension.json" with { type: 'json' };
 
 export async function createCTPExtension(
   apiRoot,
