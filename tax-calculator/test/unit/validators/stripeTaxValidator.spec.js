@@ -1,5 +1,5 @@
 import { expect, describe, it, jest, beforeEach, afterEach } from '@jest/globals';
-import { StripeTaxValidator, validateStripeTax } from '../../src/connectors/stripeTaxValidator.js';
+import { StripeTaxValidator, validateStripeTax } from '../../../src/validators/stripeTaxValidator.js';
 
 // Mock the stripe module
 jest.mock('stripe', () => {
@@ -13,7 +13,7 @@ jest.mock('stripe', () => {
 });
 
 
-describe('StripeTaxValidator', () => {
+describe('stripeTaxValidator.spec', () => {
   let validator;
   let mockStripe;
   let originalEnv;

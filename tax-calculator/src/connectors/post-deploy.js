@@ -2,11 +2,12 @@ import 'dotenv/config';
 
 import { createApiRoot } from '../clients/create.client.js';
 import { createCTPExtension } from './action.js';
-import { validateStripeTax } from './stripeTaxValidator.js';
+import { validateStripeTax } from '../validators/stripeTaxValidator.js';
 import { logger } from '../utils/logger.utils.js';
 import {
   CONNECT_SERVICE_URL,
   CTP_TAX_CALCULATOR_EXTENSION_KEY,
+  TAX_PROVIDER_API_TOKEN,
 } from './constants.js';
 
 /**
@@ -17,17 +18,17 @@ import {
  * @throws {Error} When required properties are missing or validation/creation fails
  * @returns {Promise<void>} Resolves when post-deploy process completes successfully
  */
-async function postDeploy(properties) {
+export async function postDeploy(properties) {
   const ctpExtensionBaseUrl = properties.get(CONNECT_SERVICE_URL);
-  const stripeApiToken = properties.get('TAX_PROVIDER_API_TOKEN');
+  const stripeApiToken = properties.get(TAX_PROVIDER_API_TOKEN);
 
   // Validate required properties
   if (!stripeApiToken) {
-    throw new Error('TAX_PROVIDER_API_TOKEN is required for Stripe Tax validation');
+    throw new Error(TAX_PROVIDER_API_TOKEN + ' is required for Stripe Tax validation');
   }
 
   if (!ctpExtensionBaseUrl) {
-    throw new Error('CONNECT_SERVICE_URL is required for extension creation');
+    throw new Error(CONNECT_SERVICE_URL + ' is required for extension creation');
   }
 
   logger.info('Starting post-deploy process...');
@@ -47,7 +48,7 @@ async function postDeploy(properties) {
 
 }
 
-async function run() {
+export async function run() {
   try {
     const properties = new Map(Object.entries(process.env));
     await postDeploy(properties);
