@@ -11,6 +11,7 @@ describe('tax-calculator.controller.spec', () => {
       projectKey: 'dummy-ctp-project-key',
       scope: 'dummy-ctp-scope',
       region: 'dummy-ctp-region',
+      stripeApiToken: 'sk_test_dummy-stripe-api-token',
     };
 
     jest

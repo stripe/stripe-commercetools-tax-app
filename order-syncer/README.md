@@ -1,7 +1,7 @@
 # Order Syncer
 This module provides an application based on [commercetools Connect](https://docs.commercetools.com/connect), which receives messages from commercetools project once there is an order created. The corresponding order details are then synchronized to the external tax provider.
 
-The module also provides scripts for post-deployment and pre-undeployment action. After deployment via connect service completed, [commercetools Subscription](https://docs.commercetools.com/api/projects/subscriptions) is created by post-deployment script which listen to any order creation in commercetools Project. Once order has been created, the commercetools Subscription sends message to Google Cloud Pub/Sub topic and then notify the order syncer to handle the corresponding changes.
+The module also provides scripts for post-deployment and pre-undeployment action. After deployment via connect service completed, [commercetools Subscription](https://docs.commercetools.com/api/projects/subscriptions) is created by post-deployment script which listen to any order creation in commercetools Project. Once order has been created, the commercetools Subscription sends message to Google Cloud Pub/Sub topic and then notify the `order-syncer` to handle the corresponding changes.
 
 The commercetools Subscription would be cleared once the tax integration connector is undeployed.
 
@@ -12,7 +12,7 @@ Please specify your desired key for creation of commercetools Subscription [here
 The default key is 'ct-connect-tax-integration-order-change-subscription'.
 
 #### Install your tax-provider SDK 
-Please run following npm command under order-syncer folder to install the NodeJS SDK provided by tax provider.
+Please run following npm command under `order-syncer` folder to install the NodeJS SDK provided by the tax provider. By default, the (Stripe Node SDK)[https://www.npmjs.com/package/stripe] is included, and for is the only sdk supported.
 
 ```
 $ npm install <tax-provider-sdk>
@@ -43,12 +43,15 @@ $ npm run connector:pre-undeploy
 ```
 
 ## Development in local environment
-Different from staging and production environments, in which the out-of-the-box setup and variables have been set by connect service during deployment, the order-syncer requires additional operations in local environment for development.
-#### Create Google Cloud pub/sub topic and subscription
-When an event-type connector application is deployed via connect service, a GCP pub/sub topic and subscription are created automatically. However it does not apply on local environment. To develop the order-syncer in local environment, you need to follow the steps below:
-1. Create a Pub/Sub topic and subscription in Google Cloud platform.
+Different from staging and production environments, in which the out-of-the-box setup and variables have been set by connect service during deployment, the `order-syncer` requires additional operations in local environment for development.
+
+#### Google Cloud infrastructure.
+
+When an event-type connector application is deployed via connect service, a [GCP](https://cloud.google.com) pub/sub topic and subscription are created automatically. However, this does not apply on a local environment, such resources will then need to be created manually. 
+
+1. Create a Pub/Sub topic and subscription in Google Cloud platform. 
 2. Use HTTP tunnel tools like [ngrok](https://ngrok.com/docs/getting-started) to expose your local development `/orderSyncer` server to internet.
-3. Set the URL provided by the tunnel tool as the destination of GCP subscription, so that message can be forwarded to the order-syncer in your local environment.
+3. Set the URL provided by the tunnel tool as the destination of GCP subscription, so that message can be forwarded to the `order-syncer` in your local environment.
 
 For details, please refer to the [Overview of the GCP Pub/Sub service](https://cloud.google.com/pubsub/docs/pubsub-basics).
 
@@ -76,26 +79,29 @@ Post-deploy failed: A test message could not be delivered to this destination: G
 
 Steps to resolve:
 
-1. Log in to Google Cloud:
+1. Install https://cloud.google.com/sdk/docs/install
+
+
+2. Log in to Google Cloud:
     gcloud auth login
 
-2. Set the active project:
+3. Set the active project:
     gcloud config set project stripe-tax
 
-3. Verify that you can see the subscription topic:
+4. Verify that you can see the subscription topic:
     gcloud pubsub topics list --project=stripe-tax
 
-4. Create a service account:
+5. Create a service account:
     gcloud iam service-accounts create commercetools-pubsub \
         --display-name="Commercetools Pub/Sub Publisher" \
         --project=stripe-tax
 
-5. Grant the Pub/Sub publisher role to the service account:
+6. Grant the Pub/Sub publisher role to the service account:
     gcloud projects add-iam-policy-binding stripe-tax \
         --member="serviceAccount:commercetools-pubsub@stripe-tax.iam.gserviceaccount.com" \
         --role="roles/pubsub.publisher"
 
-6. Create and download the service account key:
+7. Create and download the service account key:
     gcloud iam service-accounts keys create commercetools-key.json \
         --iam-account=commercetools-pubsub@stripe-tax.iam.gserviceaccount.com \
         --project=stripe-tax
