@@ -123,3 +123,91 @@ export async function deleteCTPExtension(
     );
   }
 }
+
+/**
+ * Validate that all categories in TAX_CODE_MAPPING_JSON exist in commercetools
+ *
+ * This validation ensures that the tax code mapping configuration is valid before
+ * the connector is fully installed. Since tax-calculator uses this mapping at runtime
+ * for tax code lookups, we validate during installation to catch configuration errors early.
+ *
+ * @param {Object} apiRoot - commercetools API client
+ * @param {Object} mapping - Parsed tax code mapping
+ * @throws {Error} If a category doesn't exist
+ */
+export async function validateTaxCodeMapping(apiRoot, mapping) {
+  // If mapping is empty or has no categories, allow installation
+  if (!mapping || !mapping.categories || mapping.categories.length === 0) {
+    logger.info('TAX_CODE_MAPPING_JSON is empty or not provided. Connector will be installed with empty mapping.');
+    return;
+  }
+
+  logger.info(`Validating ${mapping.categories.length} category mappings...`);
+
+  // Validate each category mapping
+  for (let i = 0; i < mapping.categories.length; i++) {
+    const entry = mapping.categories[i];
+    const { ctCategory } = entry;
+
+    if (!ctCategory || typeof ctCategory !== 'object') {
+      throw new Error(
+        `Invalid mapping at index ${i}: ctCategory must be an object`
+      );
+    }
+
+    const { id, key } = ctCategory;
+
+    // Skip validation if both id and key are missing (this should have been caught by config validation)
+    if (!id && !key) {
+      throw new Error(
+        `Invalid mapping at index ${i}: ctCategory must have either "id" or "key"`
+      );
+    }
+
+    // Build query to check if category exists
+    const whereClauses = [];
+    if (id) {
+      whereClauses.push(`id="${id}"`);
+    }
+    if (key) {
+      whereClauses.push(`key="${key}"`);
+    }
+
+    const whereQuery = whereClauses.join(' or ');
+
+    try {
+      const {
+        body: { results: categories },
+      } = await apiRoot
+        .categories()
+        .get({
+          queryArgs: {
+            where: whereQuery,
+            limit: 1,
+          },
+        })
+        .execute();
+
+      if (!categories || categories.length === 0) {
+        const identifierDesc = id && key ? `id="${id}" or key="${key}"` : id ? `id="${id}"` : `key="${key}"`;
+        throw new Error(
+          `Category validation failed: Category with ${identifierDesc} does not exist in commercetools project. ` +
+            `Please ensure all categories in TAX_CODE_MAPPING_JSON exist before installing the connector.`
+        );
+      }
+
+      // Log successful validation
+      const identifierDesc = id && key ? `id="${id}", key="${key}"` : id ? `id="${id}"` : `key="${key}"`;
+      logger.info(`Category validated: ${identifierDesc} -> ${entry.taxCode}`);
+    } catch (error) {
+      if (error.message.includes('Category validation failed')) {
+        throw error;
+      }
+      throw new Error(
+        `Failed to validate category mapping at index ${i}: ${error.message}`
+      );
+    }
+  }
+
+  logger.info(`All ${mapping.categories.length} category mappings validated successfully`);
+}

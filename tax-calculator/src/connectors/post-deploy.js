@@ -1,17 +1,38 @@
 import 'dotenv/config';
 
 import { createApiRoot } from '../clients/create.client.js';
-import { createCTPExtension } from './action.js';
+import { createCTPExtension, validateTaxCodeMapping } from './action.js';
 import {
   CONNECT_SERVICE_URL,
   CTP_TAX_CALCULATOR_EXTENSION_KEY,
+  TAX_CODE_MAPPING_JSON_KEY,
 } from './constants.js';
+import { logger } from '../utils/logger.utils.js';
 
 async function postDeploy(properties) {
   //The URL of deployed connector could be obtained via env-var CONNECT_SERVICE_URL after deployment.
   const ctpExtensionBaseUrl = properties.get(CONNECT_SERVICE_URL);
+  const taxCodeMappingJson = properties.get(TAX_CODE_MAPPING_JSON_KEY);
 
   const apiRoot = createApiRoot();
+
+  // Validate tax code mapping if provided
+  if (taxCodeMappingJson) {
+    try {
+      const mapping = JSON.parse(taxCodeMappingJson);
+      await validateTaxCodeMapping(apiRoot, mapping);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error(
+          `Invalid TAX_CODE_MAPPING_JSON format: ${error.message}`
+        );
+      }
+      throw error;
+    }
+  } else {
+    logger.info('TAX_CODE_MAPPING_JSON not provided. Connector will be installed with empty mapping.');
+  }
+
   await createCTPExtension(
     apiRoot,
     CTP_TAX_CALCULATOR_EXTENSION_KEY,
@@ -24,7 +45,7 @@ async function run() {
     const properties = new Map(Object.entries(process.env));
     await postDeploy(properties);
   } catch (error) {
-    process.stderr.write(`Post-deploy failed: ${error.message}\n`);
+    logger.error('Post-deploy failed', { error: error.message, stack: error.stack });
     process.exitCode = 1;
   }
 }
