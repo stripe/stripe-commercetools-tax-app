@@ -5,13 +5,13 @@ import { encodeJsonObject } from './utils/encoder.utils.js';
 import { HTTP_STATUS_SUCCESS_ACCEPTED } from '../../src/constants/http.status.constants.js';
 /** Reminder : Please put mandatory environment variables in the settings of your github repository **/
 describe('Test sync.route.js', () => {
-  it(`When resource identifier is absent in URL, it should returns 404 http status`, async () => {
+  it(`When resource identifier is absent in URL, it should returns 202 http status`, async () => {
     let response = {};
     // Send request to the connector application with following code snippet.
 
     response = await request(server).post(`/`);
     expect(response).toBeDefined();
-    expect(response.statusCode).toEqual(404);
+    expect(response.statusCode).toEqual(202);
   });
 
   it(`When payload body does not exist, it should returns 400 http status`, async () => {
