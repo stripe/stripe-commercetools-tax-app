@@ -53,7 +53,7 @@ export async function run() {
     const properties = new Map(Object.entries(process.env));
     await postDeploy(properties);
   } catch (error) {
-    logger.error('Post-deploy failed', { error: error.message, stack: error.stack });
+    process.stderr.write('Post-deploy failed', { error: error.message, stack: error.stack });
     process.exitCode = 1;
   }
 }
