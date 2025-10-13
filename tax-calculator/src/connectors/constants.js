@@ -1,2 +1,3 @@
 export const CONNECT_SERVICE_URL = 'CONNECT_SERVICE_URL';
 export const CTP_TAX_CALCULATOR_EXTENSION_KEY = 'ctpTaxCalculatorExtension';
+export const TAX_PROVIDER_API_TOKEN = 'TAX_PROVIDER_API_TOKEN';

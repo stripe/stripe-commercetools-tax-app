@@ -9,7 +9,6 @@ import {
 
 import CustomError from '../errors/custom.error.js';
 import configUtils from '../utils/config.util.js';
-import { validateCartAddress } from '../validators/address.validator.js';
 
 const CTP_TYPE_TAX_TXN_KEY = 'stripe-tax';
 
