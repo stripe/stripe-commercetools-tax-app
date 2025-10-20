@@ -8,7 +8,16 @@
     {
       "resourceTypeId": "cart",
       "actions": ["Update", "Create"],
-      "condition": "taxMode=\"ExternalAmount\" and cartState=\"Frozen\""
+      "condition": "taxMode=\"ExternalAmount\" and cartState=\"Frozen\"",
+      "expand": [
+        "lineItems[*].custom",
+        "lineItems[*].variant.custom",
+        "lineItems[*].categories[*].custom",
+        "lineItems[*].categories[*].parent.custom",
+        "shippingInfo.shippingMethod.custom",
+        "shipping[*].shippingInfo.shippingMethod.custom",
+        "custom"
+      ]
     }
   ],
   "timeoutInMs": 2000

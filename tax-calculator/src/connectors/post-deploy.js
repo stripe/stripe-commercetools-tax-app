@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 import { createApiRoot } from '../clients/create.client.js';
-import { createCTPExtension, validateTaxCodeMapping } from './action.js';
+import { createCTPExtension, validateTaxCodeMapping, createCustomTypes } from './action.js';
 import {
   CONNECT_SERVICE_URL,
   CTP_TAX_CALCULATOR_EXTENSION_KEY,
@@ -16,7 +16,7 @@ async function postDeploy(properties) {
 
   const apiRoot = createApiRoot();
 
-  // Validate tax code mapping if provided
+  // Step 1: Create custom types for tax code configuration
   if (taxCodeMappingJson) {
     try {
       const mapping = JSON.parse(taxCodeMappingJson);
@@ -33,6 +33,10 @@ async function postDeploy(properties) {
     logger.info('TAX_CODE_MAPPING_JSON not provided. Connector will be installed with empty mapping.');
   }
 
+  // Step 2: Create custom types
+  await createCustomTypes(apiRoot);
+
+  // Step 3: Create API extension for tax calculation
   await createCTPExtension(
     apiRoot,
     CTP_TAX_CALCULATOR_EXTENSION_KEY,

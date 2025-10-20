@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger.utils.js';
 import taxCodeMappingConfig from '../config/taxCodeMapping.config.js';
 import TaxCodeNotFoundError from '../errors/taxCodeNotFound.error.js';
+import TaxCodeShippingNotFoundError from '../errors/taxCodeShippingNotFound.error.js';
 
 /**
  * Tax Code Service
@@ -27,28 +28,35 @@ class TaxCodeService {
     }
 
     try {
-      // Step 1: Check product custom field
+      // Step 1: Check category custom type
+      const customTypeCategoryTaxCode = this.getCustomTypeCategoryTaxCode(cartLineItem);
+      if (customTypeCategoryTaxCode) {
+        this.logTaxCodeDecision(cartLineItem, customTypeCategoryTaxCode, 'custom_type_category');
+        return customTypeCategoryTaxCode;
+      }
+
+      // Step 2: Check product custom field
       const customFieldTaxCode = this.getCustomFieldTaxCode(cartLineItem);
       if (customFieldTaxCode) {
         this.logTaxCodeDecision(cartLineItem, customFieldTaxCode, 'custom_field');
         return customFieldTaxCode;
       }
 
-      // Step 2: Look up category in customer's mapping
+      // Step 3: Look up category in customer's mapping
       const categoryTaxCode = this.getCategoryTaxCode(cartLineItem);
       if (categoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, categoryTaxCode, 'category_mapping');
         return categoryTaxCode;
       }
 
-      // Step 3: Traverse parent categories
+      // Step 4: Traverse parent categories
       const parentCategoryTaxCode = this.getParentCategoryTaxCode(cartLineItem);
       if (parentCategoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, parentCategoryTaxCode, 'parent_category');
         return parentCategoryTaxCode;
       }
 
-      // Step 4: No tax code found - throw error
+      // Step 5: No tax code found - throw error
       throw new TaxCodeNotFoundError(
         cartLineItem.productId,
         cartLineItem.name || 'Unknown Product',
@@ -75,20 +83,66 @@ class TaxCodeService {
   }
 
   /**
-   * Step 1: Check if product has custom taxCode field
+   * Step 1: Check category custom type
+   * @param {Object} cartLineItem - Cart line item
+   * @returns {string|null} Tax code from category custom type or null
+   */
+  getCustomTypeCategoryTaxCode(cartLineItem) {
+    const categories = cartLineItem.categories || [];
+    
+    if (categories.length === 0) {
+      return null;
+    }
+  
+    const processedCategories = new Set();
+    
+    // For each category assigned to the product
+    for (const category of categories) {
+      const taxCode = this.findFirstTaxCodeInHierarchy(category, processedCategories);
+      if (taxCode) {
+        return taxCode;
+      }
+    }
+    
+    return null;
+  }
+  
+  findFirstTaxCodeInHierarchy(category, processedCategories, depth = 0, maxDepth = 10) {
+    if (!category || depth >= maxDepth || processedCategories.has(category.id)) {
+      return null;
+    }
+    
+    processedCategories.add(category.id);
+    
+    // Check if tax code is in the current category
+    const taxCode = category.custom?.fields?.connectorTaxStripe_Code;
+    if (taxCode) {
+      return taxCode;
+    }
+    
+    // Check if tax code is in the parent category
+    if (category.parent) {
+      return this.findFirstTaxCodeInHierarchy(category.parent, processedCategories, depth + 1, maxDepth);
+    }
+    
+    return null;
+  }
+
+  /**
+   * Step 2: Check if product has custom taxCode field
    * @param {Object} cartLineItem - Cart line item
    * @returns {string|null} Tax code from custom field or null
    */
   getCustomFieldTaxCode(cartLineItem) {
     // Check line item custom fields
-    const lineItemTaxCode = cartLineItem.custom?.fields?.taxCode;
+    const lineItemTaxCode = cartLineItem.custom?.fields?.connectorTaxStripe_Code;
     if (lineItemTaxCode) {
       logger.debug(`Found tax code in line item custom field: ${lineItemTaxCode}`);
       return lineItemTaxCode;
     }
 
     // Check variant custom fields
-    const variantTaxCode = cartLineItem.variant?.custom?.fields?.taxCode;
+    const variantTaxCode = cartLineItem.variant?.custom?.fields?.connectorTaxStripe_Code;
     if (variantTaxCode) {
       logger.debug(`Found tax code in variant custom field: ${variantTaxCode}`);
       return variantTaxCode;
@@ -98,7 +152,7 @@ class TaxCodeService {
   }
 
   /**
-   * Step 2: Look up category in customer's mapping
+   * Step 3: Look up category in customer's mapping
    * @param {Object} cartLineItem - Cart line item
    * @returns {string|null} Tax code from category mapping or null
    */
@@ -133,7 +187,7 @@ class TaxCodeService {
   }
 
   /**
-   * Step 3: Traverse parent categories until match found
+   * Step 4: Traverse parent categories until match found
    * @param {Object} cartLineItem - Cart line item
    * @returns {string|null} Tax code from parent category or null
    */
@@ -198,10 +252,97 @@ class TaxCodeService {
   }
 
   /**
+   * Get shipping tax code from shipping info
+   * @param {Object} shippingInfo - Shipping info
+   * @param {string} shippingMode - Shipping mode
+   * @returns {string} Shipping tax code
+   * @throws {TaxCodeShippingNotFoundError} If no tax code can be determined
+   */
+  getShippingTaxCodeFromShippingInfo(shippingInfo, shippingMode) {
+    try {
+      // Step 1: Check custom type
+      const customTypeShippingTaxCode = shippingInfo?.shippingMethod?.obj?.custom?.fields?.connectorTaxStripe_Code;
+      if (customTypeShippingTaxCode) {
+        return customTypeShippingTaxCode;
+      }
+
+      if (shippingMode === 'Single') {
+        throw new TaxCodeShippingNotFoundError(
+          shippingInfo.shippingMethod?.id,
+          shippingInfo.shippingMethod?.typeId,
+          shippingInfo.shippingMethod?.obj,
+          shippingMode
+        );
+      }
+
+    } catch (error) {
+      if (error instanceof TaxCodeShippingNotFoundError) {
+        logger.warn('Tax code not found for shipping method', {  
+          shippingMethodId: error.shippingMethodId,
+          shippingMethodTypeId: error.shippingMethodTypeId,
+          shippingMethodObj: error.shippingMethodObj,
+          shippingMode: error.shippingMode
+        });
+        throw error;
+      }
+
+      // Unexpected error
+      logger.error('Unexpected error in shipping tax code determination', {
+        error: error.message,
+        shippingMethodId: shippingInfo.shippingMethod?.id,
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Get shipping tax code from shipping
+   * @param {Array} shippingArray - Shipping array
+   * @param {string} shippingMode - Shipping mode
+   * @returns {string} Shipping tax code
+   * @throws {TaxCodeShippingNotFoundError} If no tax code can be determined
+   */
+  getShippingPriceAndTaxCodeFromShipping(shippingArray, shippingMode) {
+    try {
+      
+      for (const shipping of shippingArray) {
+        const taxCode = this.getShippingTaxCodeFromShippingInfo(shipping, shippingMode);
+        if (taxCode) {
+          return {price: shipping.price?.centAmount, taxCode: taxCode};
+        }
+      }
+
+      throw new TaxCodeShippingNotFoundError(
+        null, // Multiple mode does not have a specific shipping method id
+        null, // Multiple mode does not have a specific shipping method type id
+        shippingArray,
+        shippingMode
+      );
+
+    } catch (error) {
+      if (error instanceof TaxCodeShippingNotFoundError) {
+        logger.warn('Tax code not found for shipping', {
+          shippingObj: error.shippingMethodObj,
+          shippingMode: error.shippingMode
+        });
+        throw error;
+      }
+
+      // Unexpected error
+      logger.error('Unexpected error in shipping tax code determination', {
+        error: error.message,
+        shipping: shippingArray
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Log tax code decision for audit trail
    * @param {Object} cartLineItem - Cart line item
    * @param {string} taxCode - Assigned tax code
-   * @param {string} source - Source of tax code (custom_field, category_mapping, parent_category)
+   * @param {string} source - Source of tax code (category_custom_type, custom_field, category_mapping, parent_category)
    */
   logTaxCodeDecision(cartLineItem, taxCode, source) {
     logger.info('Tax code assigned', {

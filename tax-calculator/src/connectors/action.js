@@ -2,6 +2,13 @@ import _ from 'lodash';
 import { serializeError } from 'serialize-error';
 import { logger } from '../utils/logger.utils.js';
 import extensionTemplate from "./../../resources/api-extension.json" assert { type: 'json' };
+import {
+  PRODUCT_TAX_CUSTOM_TYPE,
+  CATEGORY_TAX_CUSTOM_TYPE,
+  SHIPPING_TAX_CUSTOM_TYPE,
+} from './customTypes.js';
+
+const TAX_CODE_CUSTOM_TYPE_NAME = 'connectorTaxStripe_Code';
 
 export async function createCTPExtension(
   apiRoot,
@@ -210,4 +217,266 @@ export async function validateTaxCodeMapping(apiRoot, mapping) {
   }
 
   logger.info(`All ${mapping.categories.length} category mappings validated successfully`);
+}
+
+/**
+ * Create all required custom types for Stripe Tax connector
+ * This function is called during post-deploy to set up custom types
+ * 
+ * @param {Object} apiRoot - commercetools API client
+ */
+export async function createCustomTypes(apiRoot) {
+  logger.info('Creating custom types for Stripe Tax connector...');
+
+  const customTypes = [
+    PRODUCT_TAX_CUSTOM_TYPE,
+    CATEGORY_TAX_CUSTOM_TYPE,
+    SHIPPING_TAX_CUSTOM_TYPE
+  ];
+
+  for (const customType of customTypes) {
+    try {
+      await createCustomType(apiRoot, customType);
+    } catch (error) {
+      logger.error(`Failed to create custom type '${customType.key}':`, error);
+      throw new Error(`Custom type creation failed: ${error.message}`);
+    }
+  }
+
+  logger.info('All custom types created successfully');
+}
+
+/**
+ * Create a single custom type
+ * @param {Object} apiRoot - commercetools API client
+ * @param {Object} customTypeDef - Custom type definition
+ */
+async function createCustomType(apiRoot, customTypeDef) {
+  const typeKey = customTypeDef.key;
+
+  try {
+    // Check if custom type already exists
+    const existingType = await getCustomType(apiRoot, typeKey);
+
+    if (existingType) {
+      logger.info(`Custom type '${typeKey}' already exists, checking for updates...`);
+      await updateCustomTypeIfNeeded(apiRoot, existingType, customTypeDef);
+    } else {
+      logger.info(`Creating custom type '${typeKey}'...`);
+      await createNewCustomType(apiRoot, customTypeDef);
+    }
+  } catch (error) {
+    logger.error(`Failed to ensure custom type '${typeKey}': ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Get existing custom type by key
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} key - Custom type key
+ * @returns {Object|null} Custom type or null if not found
+ */
+async function getCustomType(apiRoot, key) {
+  try {
+    const response = await apiRoot
+      .types()
+      .withKey({ key })
+      .get()
+      .execute();
+    return response.body;
+  } catch (error) {
+    if (error.statusCode === 404) {
+      return null; // Type doesn't exist
+    }
+    throw error;
+  }
+}
+
+/**
+ * Create a new custom type
+ * @param {Object} apiRoot - commercetools API client
+ * @param {Object} customTypeDef - Custom type definition
+ */
+async function createNewCustomType(apiRoot, customTypeDef) {
+  const response = await apiRoot
+    .types()
+    .post({ body: customTypeDef })
+    .execute();
+
+  logger.info(`Custom type '${customTypeDef.key}' created successfully`, {
+    id: response.body.id,
+    key: response.body.key,
+    resourceTypes: customTypeDef.resourceTypeIds
+  });
+
+  return response.body;
+}
+
+/**
+ * Update existing custom type if needed
+ * @param {Object} apiRoot - commercetools API client
+ * @param {Object} existingType - Existing custom type
+ * @param {Object} customTypeDef - Desired custom type definition
+ */
+async function updateCustomTypeIfNeeded(apiRoot, existingType, customTypeDef) {
+  // Check if required field exists
+  const hasRequiredField = existingType.fieldDefinitions?.some(
+    field => field.name === TAX_CODE_CUSTOM_TYPE_NAME
+  );
+
+  if (hasRequiredField) {
+    logger.info(`Custom type '${customTypeDef.key}' already has required fields`);
+    return existingType;
+  }
+
+  // Add missing field about Stripe tax code
+  logger.info(`Adding missing field to custom type '${customTypeDef.key}'...`);
+
+  const updateActions = [{
+    action: 'addFieldDefinition',
+    fieldDefinition: customTypeDef.fieldDefinitions[0]
+  }];
+
+  const response = await apiRoot
+    .types()
+    .withKey({ key: existingType.key })
+    .post({
+      body: {
+        version: existingType.version,
+        actions: updateActions
+      }
+    })
+    .execute();
+
+  logger.info(`Custom type '${customTypeDef.key}' updated successfully`);
+  return response.body;
+}
+
+/**
+ * Delete all custom types created by the connector
+ * This function is called during pre-undeploy to clean up custom types
+ * 
+ * @param {Object} apiRoot - commercetools API client
+ * @param {boolean} cleanupCustomTypes - Whether to remove custom types (default: false)
+ */
+export async function deleteCustomTypes(apiRoot, cleanupCustomTypes = false) {
+  if (!cleanupCustomTypes) {
+    logger.info('Custom type cleanup disabled. Custom types will remain in commercetools.');
+    return;
+  }
+
+  logger.info('Cleaning up custom types...');
+
+  const customTypeKeys = [
+    PRODUCT_TAX_CUSTOM_TYPE.key,
+    CATEGORY_TAX_CUSTOM_TYPE.key,
+    SHIPPING_TAX_CUSTOM_TYPE.key
+  ];
+
+  for (const typeKey of customTypeKeys) {
+    try {
+      const existingType = await getCustomType(apiRoot, typeKey);
+      
+      if (existingType) {
+        await apiRoot
+          .types()
+          .withKey({ key: typeKey })
+          .delete({ 
+            queryArgs: { 
+              version: existingType.version 
+            } 
+          })
+          .execute();
+        
+        logger.info(`Custom type '${typeKey}' removed successfully`);
+      } else {
+        logger.info(`Custom type '${typeKey}' not found, skipping...`);
+      }
+    } catch (error) {
+      if (error.statusCode === 404) {
+        logger.info(`Custom type '${typeKey}' already removed`);
+      } else {
+        logger.warn(`Could not remove custom type '${typeKey}': ${error.message}`);
+      }
+    }
+  }
+
+  logger.info('Custom type cleanup completed');
+}
+
+/**
+ * Validate that custom types exist and are properly configured
+ * This can be used for health checks or validation during connector startup
+ * 
+ * @param {Object} apiRoot - commercetools API client
+ * @returns {Object} Validation result with status and details
+ */
+export async function validateCustomTypes(apiRoot) {
+  const validationResult = {
+    isValid: true,
+    customTypes: [],
+    errors: []
+  };
+
+  const customTypeKeys = [
+    PRODUCT_TAX_CUSTOM_TYPE.key,
+    CATEGORY_TAX_CUSTOM_TYPE.key,
+    SHIPPING_TAX_CUSTOM_TYPE.key
+  ];
+
+  try {
+    for (const typeKey of customTypeKeys) {
+      const typeValidation = {
+        key: typeKey,
+        exists: false,
+        hasRequiredField: false,
+        resourceTypes: []
+      };
+
+      try {
+        const customType = await getCustomType(apiRoot, typeKey);
+        
+        if (customType) {
+          typeValidation.exists = true;
+          typeValidation.resourceTypes = customType.resourceTypeIds || [];
+
+          // Check if required field exists
+          const hasRequiredField = customType.fieldDefinitions?.some(
+            field => field.name === TAX_CODE_CUSTOM_TYPE_NAME
+          );
+          
+          typeValidation.hasRequiredField = hasRequiredField;
+          
+          if (!hasRequiredField) {
+            validationResult.isValid = false;
+            validationResult.errors.push(
+              `Custom type '${typeKey}' is missing required field ${TAX_CODE_CUSTOM_TYPE_NAME}`
+            );
+          }
+        } else {
+          validationResult.isValid = false;
+          validationResult.errors.push(`Custom type '${typeKey}' does not exist`);
+        }
+      } catch (error) {
+        validationResult.isValid = false;
+        validationResult.errors.push(`Failed to validate custom type '${typeKey}': ${error.message}`);
+      }
+
+      validationResult.customTypes.push(typeValidation);
+    }
+
+    if (validationResult.isValid) {
+      logger.info('All custom types are properly configured');
+    } else {
+      logger.warn('Some custom types have configuration issues', validationResult.errors);
+    }
+
+    return validationResult;
+  } catch (error) {
+    logger.error('Custom type validation failed:', error);
+    validationResult.isValid = false;
+    validationResult.errors.push(`Validation failed: ${error.message}`);
+    return validationResult;
+  }
 }
