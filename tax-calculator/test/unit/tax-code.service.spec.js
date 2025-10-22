@@ -2,6 +2,7 @@
 import { expect, describe, it, jest, beforeEach } from '@jest/globals';
 import taxCodeService from '../../src/services/tax-code.service.js';
 import TaxCodeNotFoundError from '../../src/errors/taxCodeNotFound.error.js';
+import { TAX_CODE_CUSTOM_TYPE_NAME } from '../../src/connectors/customTypes.js';
 
 describe('TaxCodeService', () => {
   beforeEach(() => {
@@ -15,7 +16,7 @@ describe('TaxCodeService', () => {
         productId: 'product-1',
         custom: {
           fields: {
-            connectorTaxStripe_Code: 'txcd_12345678'
+            [TAX_CODE_CUSTOM_TYPE_NAME]: 'txcd_12345678'
           }
         }
       };
@@ -31,7 +32,7 @@ describe('TaxCodeService', () => {
         variant: {
           custom: {
             fields: {
-              connectorTaxStripe_Code: 'txcd_87654321'
+              [TAX_CODE_CUSTOM_TYPE_NAME]: 'txcd_87654321'
             }
           }
         }
@@ -50,7 +51,7 @@ describe('TaxCodeService', () => {
             id: 'category-1',
             custom: {
               fields: {
-                connectorTaxStripe_Code: 'txcd_11111111'
+                [TAX_CODE_CUSTOM_TYPE_NAME]: 'txcd_11111111'
               }
             }
           }
@@ -88,7 +89,7 @@ describe('TaxCodeService', () => {
           obj: {
             custom: {
               fields: {
-                connectorTaxStripe_Code: 'txcd_shipping_01'
+                [TAX_CODE_CUSTOM_TYPE_NAME]: 'txcd_shipping_01'
               }
             }
           }

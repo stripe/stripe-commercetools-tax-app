@@ -2,16 +2,13 @@ import _ from 'lodash';
 import {logger} from '../utils/logger.utils.js';
 import {
     HTTP_STATUS_BAD_REQUEST,
-    HTTP_STATUS_SERVER_ERROR,
     HTTP_STATUS_SUCCESS_ACCEPTED,
 } from '../constants/http.status.constants.js';
 
 import CustomError from '../errors/custom.error.js';
 //import { validateCartAddress } from '../validators/address.validator.js';
 import taxCodeService from '../services/tax-code.service.js';
-import TaxCodeNotFoundError from '../errors/taxCodeNotFound.error.js';
-import TaxCodeShippingNotFoundError from '../errors/taxCodeShippingNotFound.error.js';
-import MissingTaxRateForCountry from '../errors/missingTaxRateForCountry.error.js';
+import TaxErrorHandlerService from '../services/tax-error-handler.service.js';
 import { createStripeClient } from '../clients/stripe.client.js';
 
 const CTP_TYPE_TAX_TXN_KEY = 'stripe-tax';
@@ -48,92 +45,7 @@ export const taxHandler = async (request, response) => {
         logger.info(`Tax calculation from Stripe: ${JSON.stringify(calculation,null,2)}`);
         actionItems = await addUpdateCartLineItems(cartRequestBody.id, calculation);
     } catch (err) {
-        // Handle tax code not found errors - return commercetools validation error
-        if (err instanceof TaxCodeNotFoundError) {
-            logger.error('Tax code not found', {
-                productId: err.productId,
-                categories: err.categories
-            });
-            return response.status(HTTP_STATUS_BAD_REQUEST).json({
-                errors: [err.toCommerceToolsError()]
-            });
-        }
-
-        // Handle tax code shipping not found errors - return commercetools validation error
-        if (err instanceof TaxCodeShippingNotFoundError) {
-            logger.error('Tax code shipping not found', {
-                shippingArray: err.shippingArray
-            });
-            return response.status(HTTP_STATUS_BAD_REQUEST).json({
-                errors: [err.toCommerceToolsError()]
-            });
-        }
-
-        // Handle Stripe API errors related to tax calculation
-        if (err.type === 'StripeInvalidRequestError' || err.type === 'StripeAPIError') {
-            const country = cartRequestBody.country;
-            const state = cartRequestBody.shippingMode === 'Single'
-                ? cartRequestBody.shippingAddress?.state
-                : cartRequestBody.shipping?.[0]?.shippingAddress?.state;
-
-            // Map Stripe error codes to appropriate responses
-            const stripeErrorCode = err.code;
-
-            // Tax calculation errors that indicate missing tax rate or unsupported country
-            const taxRateErrors = [
-                'taxes_calculation_failed',
-                'invalid_tax_location',
-                'customer_tax_location_invalid',
-                'shipping_address_invalid'
-            ];
-
-            if (taxRateErrors.includes(stripeErrorCode)) {
-                logger.error('Stripe tax calculation failed - missing tax rate or unsupported country', {
-                    stripeErrorCode,
-                    stripeErrorType: err.type,
-                    stripeErrorMessage: err.message,
-                    country,
-                    state,
-                    correlationId: request.headers['x-correlation-id']
-                });
-
-                const missingTaxRateError = MissingTaxRateForCountry.fromStripeError(err, country, state);
-                return response.status(HTTP_STATUS_BAD_REQUEST).json({
-                    errors: [missingTaxRateError.toCommerceToolsError()]
-                });
-            }
-
-            // Handle stripe_tax_inactive specifically
-            if (stripeErrorCode === 'stripe_tax_inactive') {
-                logger.error('Stripe Tax not activated', {
-                    stripeErrorMessage: err.message,
-                    correlationId: request.headers['x-correlation-id']
-                });
-                return response.status(HTTP_STATUS_BAD_REQUEST).json({
-                    errors: [{
-                        code: 'InvalidInput',
-                        message: 'Stripe Tax is not activated. Please enable Stripe Tax in your Stripe Dashboard.',
-                        extensionExtraInfo: {
-                            originalError: 'stripe_tax_inactive',
-                            action: 'Enable Stripe Tax at https://dashboard.stripe.com/settings/tax'
-                        }
-                    }]
-                });
-            }
-
-            // Other Stripe errors - log and return generic error
-            logger.error('Stripe API error during tax calculation', {
-                stripeErrorCode,
-                stripeErrorType: err.type,
-                stripeErrorMessage: err.message,
-                correlationId: request.headers['x-correlation-id']
-            });
-        }
-
-        // Handle other errors
-        logger.error('Unexpected error during tax calculation', err);
-        if (err.statusCode) return response.status(err.statusCode).send(err);
-        return response.status(HTTP_STATUS_SERVER_ERROR).send(err);
+        return TaxErrorHandlerService.handleTaxCalculationError(err, request, response, cartRequestBody);
     }
 
     return response.status(HTTP_STATUS_SUCCESS_ACCEPTED).send(

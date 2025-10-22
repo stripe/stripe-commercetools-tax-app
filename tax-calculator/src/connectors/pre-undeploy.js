@@ -20,6 +20,7 @@ async function run() {
   try {
     await preUndeploy();
   } catch (error) {
+    process.stderr.write(`Pre-undeploy failed: ${error.message}\n`);
     logger.error('Pre-undeploy failed', { error: error.message, stack: error.stack });
     process.exitCode = 1;
   }

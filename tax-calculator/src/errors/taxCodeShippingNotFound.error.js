@@ -1,3 +1,5 @@
+import { TAX_CODE_CUSTOM_TYPE_NAME } from "../connectors/customTypes";
+
 /**
  * Custom error thrown when no tax code can be determined for a shipping method
  * This should result in a commercetools validation error (400) response
@@ -59,9 +61,9 @@ toCommerceToolsError() {
  */
   getActionMessage() {
     if (this.shippingMode === 'Single') {
-      return 'Please configure a tax code for this shipping method by adding a custom field "connectorTaxStripe_Code" to the shipping method.';
+      return `Please configure a tax code for this shipping method by adding a custom field "${TAX_CODE_CUSTOM_TYPE_NAME}" to the shipping method.`;
     } else {
-      return 'Please configure a tax code for at least one shipping method by adding a custom field "connectorTaxStripe_Code" to the shipping methods.';
+      return `Please configure a tax code for at least one shipping method by adding a custom field "${TAX_CODE_CUSTOM_TYPE_NAME}" to the shipping methods.`;
     }
   }
 
@@ -76,7 +78,7 @@ toCommerceToolsError() {
             shippingKey: shipping.shippingKey,
             shippingMethodId: shipping.shippingInfo?.shippingMethod?.id,
             shippingMethodName: shipping.shippingInfo?.shippingMethod?.obj?.name,
-            hasTaxCode: !!shipping.shippingInfo?.shippingMethod?.obj?.custom?.fields?.connectorTaxStripe_Code
+            hasTaxCode: !!shipping.shippingInfo?.shippingMethod?.obj?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME]
           }))
         : [];
     }

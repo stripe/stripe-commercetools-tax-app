@@ -34,7 +34,7 @@
                   "id": "connector-category-tax-stripe"
                 },
                 "fields": {
-                  "connectorTaxStripe_Code": "txcd_99999999"
+                  "connectorStripeTax_TaxCode": "txcd_99999999"
                 }
               },
               "parent": {
@@ -49,7 +49,7 @@
                     "id": "connector-category-tax-stripe"
                   },
                   "fields": {
-                    "connectorTaxStripe_Code": "txcd_88888888"
+                    "connectorStripeTax_TaxCode": "txcd_88888888"
                   }
                 }
               }
@@ -83,7 +83,7 @@
                   "id": "connector-category-tax-stripe"
                 },
                 "fields": {
-                  "connectorTaxStripe_Code": "txcd_99999999"
+                  "connectorStripeTax_TaxCode": "txcd_99999999"
                 }
               }
             }
@@ -115,7 +115,7 @@
                 "id": "connector-shipping-tax-stripe"
               },
                 "fields": {
-                  "connectorTaxStripe_Code": "txcd_92010001"
+                  "connectorStripeTax_TaxCode": "txcd_92010001"
                 }
             }
           }

@@ -2,6 +2,7 @@ import { logger } from '../utils/logger.utils.js';
 import taxCodeMappingConfig from '../config/taxCodeMapping.config.js';
 import TaxCodeNotFoundError from '../errors/taxCodeNotFound.error.js';
 import TaxCodeShippingNotFoundError from '../errors/taxCodeShippingNotFound.error.js';
+import { TAX_CODE_CUSTOM_TYPE_NAME } from '../connectors/customTypes.js';
 
 /**
  * Tax Code Service
@@ -23,6 +24,7 @@ class TaxCodeService {
    * @throws {TaxCodeNotFoundError} If no tax code can be determined
    */
   getTaxCodeForProduct(cartLineItem) {
+    logger.debug('getTaxCodeForProduct', { cartLineItem });
     if (!cartLineItem) {
       throw new Error('Cart line item is required');
     }
@@ -115,7 +117,7 @@ class TaxCodeService {
     processedCategories.add(category.id);
     
     // Check if tax code is in the current category
-    const taxCode = category.custom?.fields?.connectorTaxStripe_Code;
+    const taxCode = category.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
     if (taxCode) {
       return taxCode;
     }
@@ -135,14 +137,14 @@ class TaxCodeService {
    */
   getCustomFieldTaxCode(cartLineItem) {
     // Check line item custom fields
-    const lineItemTaxCode = cartLineItem.custom?.fields?.connectorTaxStripe_Code;
+    const lineItemTaxCode = cartLineItem.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
     if (lineItemTaxCode) {
       logger.debug(`Found tax code in line item custom field: ${lineItemTaxCode}`);
       return lineItemTaxCode;
     }
 
     // Check variant custom fields
-    const variantTaxCode = cartLineItem.variant?.custom?.fields?.connectorTaxStripe_Code;
+    const variantTaxCode = cartLineItem.variant?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
     if (variantTaxCode) {
       logger.debug(`Found tax code in variant custom field: ${variantTaxCode}`);
       return variantTaxCode;
@@ -261,7 +263,7 @@ class TaxCodeService {
   getShippingTaxCodeFromShippingInfo(shippingInfo, shippingMode) {
     try {
       // Step 1: Check custom type
-      const customTypeShippingTaxCode = shippingInfo?.shippingMethod?.obj?.custom?.fields?.connectorTaxStripe_Code;
+      const customTypeShippingTaxCode = shippingInfo?.shippingMethod?.obj?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
       if (customTypeShippingTaxCode) {
         return customTypeShippingTaxCode;
       }

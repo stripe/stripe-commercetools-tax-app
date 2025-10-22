@@ -22,6 +22,7 @@ async function postDeploy(properties) {
       const mapping = JSON.parse(taxCodeMappingJson);
       await validateTaxCodeMapping(apiRoot, mapping);
     } catch (error) {
+      process.stderr.write(`Post-deploy failed: ${error.message}\n`);
       if (error instanceof SyntaxError) {
         throw new Error(
           `Invalid TAX_CODE_MAPPING_JSON format: ${error.message}`

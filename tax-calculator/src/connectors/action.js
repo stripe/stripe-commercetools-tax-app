@@ -3,12 +3,11 @@ import { serializeError } from 'serialize-error';
 import { logger } from '../utils/logger.utils.js';
 import extensionTemplate from "./../../resources/api-extension.json" assert { type: 'json' };
 import {
+  TAX_CODE_CUSTOM_TYPE_NAME,
   PRODUCT_TAX_CUSTOM_TYPE,
   CATEGORY_TAX_CUSTOM_TYPE,
   SHIPPING_TAX_CUSTOM_TYPE,
 } from './customTypes.js';
-
-const TAX_CODE_CUSTOM_TYPE_NAME = 'connectorTaxStripe_Code';
 
 export async function createCTPExtension(
   apiRoot,
@@ -236,10 +235,11 @@ export async function createCustomTypes(apiRoot) {
 
   for (const customType of customTypes) {
     try {
-      await createCustomType(apiRoot, customType);
+      await addOrUpdateCustomType(apiRoot, customType);
+      logger.info(`Custom type '${customType.key}' or field definitions related with Stripe Tax Connector have been created successfully`);
     } catch (error) {
-      logger.error(`Failed to create custom type '${customType.key}':`, error);
-      throw new Error(`Custom type creation failed: ${error.message}`);
+      logger.error(`Failed to create custom type '${customType.key}' or field definitions related with Stripe Tax Connector:`, error);
+      throw new Error(`Custom type creation or field definitions related with Stripe Tax Connector creation failed: ${error.message}`);
     }
   }
 
@@ -247,110 +247,78 @@ export async function createCustomTypes(apiRoot) {
 }
 
 /**
- * Create a single custom type
+ * Add or update a custom type
  * @param {Object} apiRoot - commercetools API client
- * @param {Object} customTypeDef - Custom type definition
+ * @param {Object} customType - Custom type definition
  */
-async function createCustomType(apiRoot, customTypeDef) {
-  const typeKey = customTypeDef.key;
+async function addOrUpdateCustomType(apiRoot, customType) {
+  // Search for types by resourceTypeIds
+  const types = await getCustomTypesByResourceTypeId(apiRoot, customType.resourceTypeIds[0]);
 
-  try {
-    // Check if custom type already exists
-    const existingType = await getCustomType(apiRoot, typeKey);
+  // Update all types that match
+  for (const type of types) {
+    const updates = (customType.fieldDefinitions ?? [])
+      .filter(
+        (newFieldDefinition) =>
+          !!type.fieldDefinitions?.find(
+            (existingFieldDefinition) =>
+              newFieldDefinition.name === existingFieldDefinition.name
+          )
+      )
+      .map((fieldDefinition) => ({
+        action: 'addFieldDefinition',
+        fieldDefinition: fieldDefinition,
+      }));
 
-    if (existingType) {
-      logger.info(`Custom type '${typeKey}' already exists, checking for updates...`);
-      await updateCustomTypeIfNeeded(apiRoot, existingType, customTypeDef);
-    } else {
-      logger.info(`Creating custom type '${typeKey}'...`);
-      await createNewCustomType(apiRoot, customTypeDef);
+    if (updates.length !== 0) {
+      await apiRoot
+        .types()
+        .withKey({ key: type.key })
+        .post({
+          body: {
+            version: type.version,
+            actions: updates,
+          },
+        })
+        .execute();
     }
-  } catch (error) {
-    logger.error(`Failed to ensure custom type '${typeKey}': ${error.message}`);
-    throw error;
+  }
+
+  // Create the type if it doesn't exist
+  if (!types.find((type) => type.key === customType.key)) {
+    await apiRoot
+      .types()
+      .post({
+        body: customType,
+      })
+      .execute();
   }
 }
 
 /**
- * Get existing custom type by key
+ * Get custom types by resourceTypeId
  * @param {Object} apiRoot - commercetools API client
- * @param {string} key - Custom type key
- * @returns {Object|null} Custom type or null if not found
+ * @param {string} resourceTypeId - The resource type ID to search for
+ * @returns {Promise<Array>} Array of custom types that match the resourceTypeId
  */
-async function getCustomType(apiRoot, key) {
+async function getCustomTypesByResourceTypeId(apiRoot, resourceTypeId) {
   try {
-    const response = await apiRoot
+    const { body: { results: types } } = await apiRoot
       .types()
-      .withKey({ key })
-      .get()
+      .get({
+        queryArgs: {
+          where: `resourceTypeIds contains any ("${resourceTypeId}")`,
+        },
+      })
       .execute();
-    return response.body;
+    
+    return types || [];
   } catch (error) {
     if (error.statusCode === 404) {
-      return null; // Type doesn't exist
+      return [];
     }
     throw error;
   }
-}
-
-/**
- * Create a new custom type
- * @param {Object} apiRoot - commercetools API client
- * @param {Object} customTypeDef - Custom type definition
- */
-async function createNewCustomType(apiRoot, customTypeDef) {
-  const response = await apiRoot
-    .types()
-    .post({ body: customTypeDef })
-    .execute();
-
-  logger.info(`Custom type '${customTypeDef.key}' created successfully`, {
-    id: response.body.id,
-    key: response.body.key,
-    resourceTypes: customTypeDef.resourceTypeIds
-  });
-
-  return response.body;
-}
-
-/**
- * Update existing custom type if needed
- * @param {Object} apiRoot - commercetools API client
- * @param {Object} existingType - Existing custom type
- * @param {Object} customTypeDef - Desired custom type definition
- */
-async function updateCustomTypeIfNeeded(apiRoot, existingType, customTypeDef) {
-  // Check if required field exists
-  const hasRequiredField = existingType.fieldDefinitions?.some(
-    field => field.name === TAX_CODE_CUSTOM_TYPE_NAME
-  );
-
-  if (hasRequiredField) {
-    logger.info(`Custom type '${customTypeDef.key}' already has required fields`);
-    return existingType;
-  }
-
-  // Add missing field about Stripe tax code
-  logger.info(`Adding missing field to custom type '${customTypeDef.key}'...`);
-
-  const updateActions = [{
-    action: 'addFieldDefinition',
-    fieldDefinition: customTypeDef.fieldDefinitions[0]
-  }];
-
-  const response = await apiRoot
-    .types()
-    .withKey({ key: existingType.key })
-    .post({
-      body: {
-        version: existingType.version,
-        actions: updateActions
-      }
-    })
-    .execute();
-
-  logger.info(`Custom type '${customTypeDef.key}' updated successfully`);
-  return response.body;
 }
 
 /**
@@ -368,41 +336,74 @@ export async function deleteCustomTypes(apiRoot, cleanupCustomTypes = false) {
 
   logger.info('Cleaning up custom types...');
 
-  const customTypeKeys = [
-    PRODUCT_TAX_CUSTOM_TYPE.key,
-    CATEGORY_TAX_CUSTOM_TYPE.key,
-    SHIPPING_TAX_CUSTOM_TYPE.key
+  const customTypes = [
+    PRODUCT_TAX_CUSTOM_TYPE,
+    CATEGORY_TAX_CUSTOM_TYPE,
+    SHIPPING_TAX_CUSTOM_TYPE
   ];
 
-  for (const typeKey of customTypeKeys) {
+  for (const customType of customTypes) {
     try {
-      const existingType = await getCustomType(apiRoot, typeKey);
-      
-      if (existingType) {
-        await apiRoot
-          .types()
-          .withKey({ key: typeKey })
-          .delete({ 
-            queryArgs: { 
-              version: existingType.version 
-            } 
-          })
-          .execute();
-        
-        logger.info(`Custom type '${typeKey}' removed successfully`);
-      } else {
-        logger.info(`Custom type '${typeKey}' not found, skipping...`);
-      }
+      await deleteOrUpdateCustomType(apiRoot, customType);
+      logger.info(`Field definitions or custom type '${customType.key}' related with Stripe Tax Connector have been removed successfully`);
     } catch (error) {
-      if (error.statusCode === 404) {
-        logger.info(`Custom type '${typeKey}' already removed`);
-      } else {
-        logger.warn(`Could not remove custom type '${typeKey}': ${error.message}`);
-      }
+      logger.error('Could not remove custom type or field definitions related with Stripe Tax Connector:', error);
     }
   }
 
   logger.info('Custom type cleanup completed');
+}
+
+/**
+ * Delete or update a custom type
+ * @param {Object} apiRoot - commercetools API client
+ * @param {Object} customType - Custom type definition
+ */
+async function deleteOrUpdateCustomType(apiRoot, customType) {
+  // Search for types by resourceTypeIds
+  const types = await getCustomTypesByResourceTypeId(apiRoot, customType.resourceTypeIds[0]);
+
+  // Update all types that match
+  for (const type of types) {
+    const updates = (customType.fieldDefinitions ?? [])
+      .filter(
+        (newFieldDefinition) =>
+          !!type.fieldDefinitions?.find(
+            (existingFieldDefinition) =>
+              newFieldDefinition.name === existingFieldDefinition.name
+            )
+      )
+      .map((fieldDefinition) => ({
+        action: 'removeFieldDefinition',
+        fieldDefinition: fieldDefinition.name,
+      }));
+
+    if (updates.length !== 0) {
+      logger.info('updates.length is not 0');
+      if (type.fieldDefinitions?.length === 1) {
+        await apiRoot
+          .types()
+          .withKey({ key: type.key })
+          .delete({
+            queryArgs: {
+              version: type.version,
+            }
+          })
+          .execute();
+      } else {
+        await apiRoot
+          .types()
+          .withKey({ key: type.key })
+          .post({
+            body: {
+              version: type.version,
+              actions: updates,
+            }
+          })
+          .execute();
+      }
+    }
+  }
 }
 
 /**

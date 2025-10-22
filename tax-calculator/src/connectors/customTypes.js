@@ -6,14 +6,14 @@
  * tax codes at different levels (products, categories, shipping methods).
  */
 
-const TAX_CODE_CUSTOM_TYPE_NAME = 'connectorTaxStripe_Code';
+export const TAX_CODE_CUSTOM_TYPE_NAME = 'connectorStripeTax_TaxCode';
 
 /**
  * Custom type for Product and Line Item tax code configuration
  * Allows merchants to set tax codes directly on products or line items
  */
 export const PRODUCT_TAX_CUSTOM_TYPE = {
-  key: 'connector-product-tax-stripe',
+  key: 'connector-stripe-tax-product',
   name: {
     en: 'Stripe Tax Connector Configuration',
   },
@@ -41,7 +41,7 @@ export const PRODUCT_TAX_CUSTOM_TYPE = {
  * Allows merchants to set tax codes directly on categories for automatic inheritance
  */
 export const CATEGORY_TAX_CUSTOM_TYPE = {
-  key: 'connector-category-tax-stripe',
+  key: 'connector-stripe-tax-category',
   name: {
     en: 'Stripe Tax Category Configuration',
   },
@@ -69,7 +69,7 @@ export const CATEGORY_TAX_CUSTOM_TYPE = {
  * Allows merchants to set tax codes for shipping methods
  */
 export const SHIPPING_TAX_CUSTOM_TYPE = {
-  key: 'connector-shipping-tax-stripe',
+  key: 'connector-stripe-tax-shipping',
   name: {
     en: 'Stripe Tax Shipping Configuration',
   },
