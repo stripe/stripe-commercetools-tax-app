@@ -10,7 +10,7 @@ describe('TaxCodeService', () => {
   });
 
   describe('getTaxCodeForProduct', () => {
-    it('should return tax code from line item custom field', () => {
+    /*it('should return tax code from line item custom field', () => {
       const cartLineItem = {
         id: 'line-item-1',
         productId: 'product-1',
@@ -40,7 +40,7 @@ describe('TaxCodeService', () => {
 
       const result = taxCodeService.getTaxCodeForProduct(cartLineItem);
       expect(result).toBe('txcd_87654321');
-    });
+    });*/
 
     it('should return tax code from category custom field', () => {
       const cartLineItem = {

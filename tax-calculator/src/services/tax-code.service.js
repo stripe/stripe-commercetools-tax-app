@@ -38,7 +38,7 @@ class TaxCodeService {
       }
 
       // Step 2: Check product custom field
-      const customFieldTaxCode = this.getCustomFieldTaxCode(cartLineItem);
+      /*const customFieldTaxCode = this.getCustomFieldTaxCode(cartLineItem);
       if (customFieldTaxCode) {
         this.logTaxCodeDecision(cartLineItem, customFieldTaxCode, 'custom_field');
         return customFieldTaxCode;
@@ -56,7 +56,7 @@ class TaxCodeService {
       if (parentCategoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, parentCategoryTaxCode, 'parent_category');
         return parentCategoryTaxCode;
-      }
+      }*/
 
       // Step 5: No tax code found - throw error
       throw new TaxCodeNotFoundError(
