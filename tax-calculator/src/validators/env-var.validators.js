@@ -53,27 +53,17 @@ const envValidators = [
     referencedBy: 'environmentVariables',
   }),
 
-  taxBehavior(['taxBehaviorDefault'], {
+  optional(taxBehavior)(['taxBehaviorDefault'], {
     code: 'InvalidTaxBehaviorDefault',
     message: 'Tax behavior default should be one of: inclusive, exclusive, automatic.',
     referencedBy: 'environmentVariables',
   }),
 
-  jsonObject(['countryTaxBehaviorMapping'], {
+  optional(jsonObject)(['countryTaxBehaviorMapping'], {
     code: 'InvalidCountryTaxBehaviorMapping',
     message: 'Country tax behavior mapping should be valid JSON object.',
     referencedBy: 'environmentVariables',
   }),
-
-  optional(standardString)(
-    ['taxBehaviorCustomFieldName'],
-    {
-      code: 'InvalidTaxBehaviorCustomFieldName',
-      message: 'Tax behavior custom field name should be a valid string.',
-      referencedBy: 'environmentVariables',
-    },
-    { min: 1, max: 50 }
-  ),
 ];
 
 export default envValidators;

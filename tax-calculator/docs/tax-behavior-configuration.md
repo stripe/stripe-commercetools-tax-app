@@ -20,6 +20,8 @@ TAX_BEHAVIOR_DEFAULT=exclusive
 ### COUNTRY_TAX_BEHAVIOR_MAPPING
 JSON object mapping country codes to their default tax behavior. This allows different tax behaviors for different markets.
 
+**Optional:** If not provided, the system will skip country-based behavior determination and proceed to merchant default.
+
 **Format:**
 ```json
 {
@@ -37,46 +39,15 @@ JSON object mapping country codes to their default tax behavior. This allows dif
 COUNTRY_TAX_BEHAVIOR_MAPPING='{"US":"exclusive","DE":"inclusive","FR":"inclusive","GB":"inclusive","AU":"inclusive"}'
 ```
 
-### TAX_BEHAVIOR_CUSTOM_FIELD_NAME
-Configurable name for the custom field that contains tax behavior overrides on products and variants.
-
-**Default:** `connectorTaxStripe_TaxBehavior`
-
-**Example:**
-```bash
-TAX_BEHAVIOR_CUSTOM_FIELD_NAME=taxBehavior
-```
-
-If not specified, the service will use the default field name `connectorTaxStripe_TaxBehavior`.
 
 ## Priority Order
 
 The tax behavior is determined using the following priority order:
 
-1. **Product Custom Field Override** - If a product or variant has the configured custom field (default: `connectorTaxStripe_TaxBehavior`), that value is used
-2. **Country Mapping** - If the shipping country matches a country in `COUNTRY_TAX_BEHAVIOR_MAPPING`, that behavior is used
-3. **Merchant Default** - Falls back to `TAX_BEHAVIOR_DEFAULT` value
-4. **Stripe Automatic** - If no behavior is determined, Stripe will use automatic behavior based on currency
+1. **Country Mapping** - If `COUNTRY_TAX_BEHAVIOR_MAPPING` is configured and the shipping country matches a country in the mapping, that behavior is used
+2. **Merchant Default** - Falls back to `TAX_BEHAVIOR_DEFAULT` value (if configured)
+3. **Stripe Automatic** - If no behavior is determined, Stripe will use automatic behavior based on currency
 
-## Product Custom Fields
-
-To override tax behavior for specific products, add a custom field to your commercetools product or variant:
-
-**Custom Field Key:** Configured via `TAX_BEHAVIOR_CUSTOM_FIELD_NAME` (default: `connectorTaxStripe_TaxBehavior`)
-**Valid Values:** `inclusive`, `exclusive`, `automatic`
-
-**Example:**
-```json
-{
-  "custom": {
-    "fields": {
-      "connectorTaxStripe_TaxBehavior": "inclusive"
-    }
-  }
-}
-```
-
-**Note:** The custom field name is configurable via the `TAX_BEHAVIOR_CUSTOM_FIELD_NAME` environment variable. If this variable is not set, the service will use the default field name `connectorTaxStripe_TaxBehavior`.
 
 ## Regional Recommendations
 
@@ -98,20 +69,35 @@ To override tax behavior for specific products, add a custom field to your comme
 
 ## Example Configuration
 
+### Full Configuration
 ```bash
 # Default behavior for all calculations
 TAX_BEHAVIOR_DEFAULT=exclusive
 
-# Country-specific overrides
+# Country-specific overrides (optional)
 COUNTRY_TAX_BEHAVIOR_MAPPING='{"US":"exclusive","CA":"exclusive","DE":"inclusive","FR":"inclusive","GB":"inclusive","AU":"inclusive","IT":"inclusive","ES":"inclusive","NL":"inclusive"}'
-
-# Custom field name for product overrides (optional - defaults to connectorTaxStripe_TaxBehavior)
-TAX_BEHAVIOR_CUSTOM_FIELD_NAME=taxBehavior
 ```
 
 This configuration will:
-- Use `exclusive` tax behavior for US and Canadian customers
-- Use `inclusive` tax behavior for European and Australian customers  
-- Fall back to `exclusive` for any other countries
-- Allow product-specific overrides via the configured custom field (default: `connectorTaxStripe_TaxBehavior`)
+- Use `exclusive` tax behavior for US and Canadian customers (from country mapping)
+- Use `inclusive` tax behavior for European and Australian customers (from country mapping)
+- Fall back to `exclusive` for any other countries (from merchant default)
 - If no behavior is determined, let Stripe use automatic behavior based on currency
+
+### Minimal Configuration
+```bash
+# Only merchant default
+TAX_BEHAVIOR_DEFAULT=exclusive
+```
+
+This configuration will:
+- Use `exclusive` tax behavior for all customers (from merchant default)
+- If no behavior is determined, let Stripe use automatic behavior based on currency
+
+### No Configuration
+```bash
+# No tax behavior environment variables set
+```
+
+This configuration will:
+- Let Stripe use automatic behavior based on currency for all customers

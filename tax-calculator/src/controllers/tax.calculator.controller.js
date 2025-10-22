@@ -11,8 +11,6 @@ import CustomError from '../errors/custom.error.js';
 import configUtils from '../utils/config.util.js';
 import { taxBehaviorService } from '../services/tax-behavior.service.js';
 
-const CTP_TYPE_TAX_TXN_KEY = 'stripe-tax';
-
 export const taxHandler = async (request, response) => {
     let calculation;
 
@@ -50,17 +48,6 @@ export const taxHandler = async (request, response) => {
 
 async function addUpdateCartLineItems(cartId, calculation) {
     let actionItems = [];
-
-    actionItems.push({
-        action: "setCustomType",
-        type: {
-            key: `${CTP_TYPE_TAX_TXN_KEY}`,
-            typeId: "type"
-        },
-        fields: {
-            taxCalculationReference: calculation.id
-        }
-    });
 
     const taxRateDetails = calculation.tax_breakdown[0]?.tax_rate_details;
     const calculatedLineItems = calculation.line_items?.data;

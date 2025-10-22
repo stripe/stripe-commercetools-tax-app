@@ -27,28 +27,20 @@ class TaxBehaviorService {
   /**
    * Core tax behavior determination logic for individual line items
    * Priority order:
-   * 1. Product-specific custom field override
-   * 3. Market/Store-based behavior (country mapping)
-   * 6. Merchant-wide default configuration
+   * 1. Market/Store-based behavior (country mapping)
+   * 2. Merchant-wide default configuration
    * 
    * Returns null if no behavior is determined, letting Stripe use automatic behavior
    */
   async determineTaxBehaviorForLineItem(lineItem, cartContext) {
-    // Priority 1: Product-specific custom field override
-    const customBehavior = this.getCustomFieldBehavior(lineItem);
-    if (customBehavior) {
-      logger.debug(`Using custom field tax behavior for product ${lineItem.productId}: ${customBehavior}`);
-      return customBehavior;
-    }
-
-    // Priority 3: Market/Store-based behavior (country mapping)
+    // Priority 1: Market/Store-based behavior (country mapping)
     const marketBehavior = this.getMarketBasedBehavior(cartContext);
     if (marketBehavior) {
       logger.debug(`Using market-based tax behavior for country ${cartContext.country}: ${marketBehavior}`);
       return marketBehavior;
     }
 
-    // Priority 6: Merchant-wide default configuration
+    // Priority 2: Merchant-wide default configuration
     const merchantBehavior = this.getMerchantDefaultBehavior();
     if (merchantBehavior) {
       logger.debug(`Using merchant default tax behavior: ${merchantBehavior}`);
@@ -60,30 +52,6 @@ class TaxBehaviorService {
     return null;
   }
 
-  /**
-   * Get tax behavior from product custom fields
-   * Checks both variant-level and product-level custom fields using configurable field name
-   */
-  getCustomFieldBehavior(lineItem) {
-    const customFieldName = this.getCustomFieldName();
-    if (!customFieldName) {
-      return null;
-    }
-
-    // Check variant-level custom field first
-    const variantBehavior = lineItem.variant?.custom?.fields?.[customFieldName];
-    if (variantBehavior && this.isValidBehavior(variantBehavior)) {
-      return variantBehavior.toLowerCase();
-    }
-
-    // Check product-level custom field
-    const productBehavior = lineItem.custom?.fields?.[customFieldName];
-    if (productBehavior && this.isValidBehavior(productBehavior)) {
-      return productBehavior.toLowerCase();
-    }
-
-    return null;
-  }
 
   /**
    * Get tax behavior based on market/store configuration (country mapping)
@@ -145,19 +113,6 @@ class TaxBehaviorService {
     return {};
   }
 
-  /**
-   * Get configurable custom field name from environment variable
-   * Defaults to 'connectorTaxStripe_TaxBehavior' if not configured
-   */
-  getCustomFieldName() {
-    try {
-      const config = configUtils.readConfiguration();
-      return config.taxBehaviorCustomFieldName || 'connectorTaxStripe_TaxBehavior';
-    } catch (error) {
-      logger.warn(`Error reading custom field name configuration: ${error.message}`);
-      return 'connectorTaxStripe_TaxBehavior';
-    }
-  }
 
   /**
    * Validate tax behavior value
@@ -186,11 +141,6 @@ class TaxBehaviorService {
    * Determine the reason for the tax behavior decision
    */
   getDecisionReason(lineItem, cartContext, _behavior) {
-    // Check if it came from custom field
-    if (this.getCustomFieldBehavior(lineItem)) {
-      return 'custom_field_override';
-    }
-
     // Check if it came from country mapping
     if (this.getMarketBasedBehavior(cartContext)) {
       return 'country_mapping';
