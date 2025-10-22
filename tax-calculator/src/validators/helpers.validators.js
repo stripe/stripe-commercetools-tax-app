@@ -139,3 +139,33 @@ export const region = (path, message) => [
     ],
   ],
 ];
+
+export const taxBehavior = (path, message) => [
+  path,
+  [
+    [
+      required((value) =>
+        validator.isIn(value?.toLowerCase(), ['inclusive', 'exclusive', 'automatic'])
+      ),
+      message,
+    ],
+  ],
+];
+
+export const jsonObject = (path, message) => [
+  path,
+  [
+    [
+      (value) => {
+        if (value === undefined || value === null) return true; // Optional field
+        try {
+          const parsed = JSON.parse(value);
+          return typeof parsed === 'object' && !Array.isArray(parsed);
+        } catch {
+          return false;
+        }
+      },
+      message,
+    ],
+  ],
+];
