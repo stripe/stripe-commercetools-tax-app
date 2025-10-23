@@ -6,6 +6,7 @@ import {
   taxBehavior,
   jsonObject,
 } from './helpers.validators.js';
+import { VALID_TAX_BEHAVIORS } from '../constants/tax-behavior.constants.js';
 
 /**
  * Create here your own validators
@@ -55,7 +56,7 @@ const envValidators = [
 
   optional(taxBehavior)(['taxBehaviorDefault'], {
     code: 'InvalidTaxBehaviorDefault',
-    message: 'Tax behavior default should be one of: inclusive, exclusive, automatic.',
+    message: `Tax behavior default should be one of: ${VALID_TAX_BEHAVIORS.join(', ')}.`,
     referencedBy: 'environmentVariables',
   }),
 

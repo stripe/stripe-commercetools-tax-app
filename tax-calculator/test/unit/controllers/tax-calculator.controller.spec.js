@@ -1,6 +1,7 @@
 import {expect, describe, it, jest, beforeEach} from '@jest/globals';
 import configUtil from '../../../src/utils/config.util.js';
 import { HTTP_STATUS_BAD_REQUEST } from '../../../src/constants/http.status.constants.js';
+import { TAX_BEHAVIOR_INCLUSIVE, TAX_BEHAVIOR_EXCLUSIVE } from '../../../src/constants/tax-behavior.constants.js';
 import {taxHandler} from "../../../src/controllers/tax.calculator.controller.js";
 
 describe('tax-calculator.controller.spec', () => {
@@ -125,7 +126,7 @@ describe('tax-calculator.controller.spec', () => {
         expect.objectContaining({
           line_items: expect.arrayContaining([
             expect.objectContaining({
-              tax_behavior: 'inclusive'
+              tax_behavior: TAX_BEHAVIOR_INCLUSIVE
             })
           ])
         })
@@ -140,7 +141,7 @@ describe('tax-calculator.controller.spec', () => {
         scope: 'dummy-ctp-scope',
         region: 'dummy-ctp-region',
         stripeApiToken: 'sk_test_dummy-stripe-api-token',
-        taxBehaviorDefault: 'inclusive'
+        taxBehaviorDefault: TAX_BEHAVIOR_INCLUSIVE
       };
 
       jest
@@ -214,7 +215,7 @@ describe('tax-calculator.controller.spec', () => {
         expect.objectContaining({
           line_items: expect.arrayContaining([
             expect.objectContaining({
-              tax_behavior: 'inclusive'
+              tax_behavior: TAX_BEHAVIOR_INCLUSIVE
             })
           ])
         })
@@ -229,7 +230,7 @@ describe('tax-calculator.controller.spec', () => {
         scope: 'dummy-ctp-scope',
         region: 'dummy-ctp-region',
         stripeApiToken: 'sk_test_dummy-stripe-api-token',
-        taxBehaviorDefault: 'inclusive'
+        taxBehaviorDefault: TAX_BEHAVIOR_INCLUSIVE
         // countryTaxBehaviorMapping not set
       };
 
@@ -304,7 +305,93 @@ describe('tax-calculator.controller.spec', () => {
         expect.objectContaining({
           line_items: expect.arrayContaining([
             expect.objectContaining({
-              tax_behavior: 'inclusive'
+              tax_behavior: TAX_BEHAVIOR_INCLUSIVE
+            })
+          ])
+        })
+      );
+    });
+
+    it('should use exclusive tax behavior when configured', async () => {
+      const dummyConfig = {
+        clientId: 'dummy-ctp-client-id',
+        clientSecret: 'dummy-ctp-client-secret',
+        projectKey: 'dummy-ctp-project-key',
+        scope: 'dummy-ctp-scope',
+        region: 'dummy-ctp-region',
+        stripeApiToken: 'sk_test_dummy-stripe-api-token',
+        taxBehaviorDefault: TAX_BEHAVIOR_EXCLUSIVE
+      };
+
+      jest
+        .spyOn(configUtil, "readConfiguration")
+        .mockImplementation(({ success }) => success(dummyConfig));
+
+      const mockRequest = {
+        method: 'POST',
+        url: '/',
+        body: {
+          resource: {
+            obj: {
+              id: 'test-cart-id',
+              country: 'US',
+              currency: 'USD',
+              lineItems: [{
+                id: 'line-item-1',
+                totalPrice: { centAmount: 10000, currencyCode: 'USD' }
+              }],
+              shippingMode: 'Single',
+              shippingAddress: {
+                country: 'US',
+                streetName: 'Test Street',
+                postalCode: '12345',
+                city: 'Test City',
+                state: 'CA'
+              }
+            }
+          }
+        },
+      };
+
+      const mockResponse = {
+        status: () => ({
+          send: () => {},
+        }),
+      };
+
+      const mockStripe = {
+        tax: {
+          calculations: {
+            create: jest.fn().mockResolvedValue({
+              id: 'tax_calc_123',
+              currency: 'usd',
+              tax_breakdown: [{
+                tax_rate_details: {
+                  tax_type: 'sales_tax',
+                  percentage_decimal: 850,
+                  country: 'US'
+                }
+              }],
+              line_items: {
+                data: [{
+                  reference: 'line-item-1',
+                  amount_tax: 850
+                }]
+              }
+            })
+          }
+        }
+      };
+
+      jest.doMock('stripe', () => jest.fn(() => mockStripe));
+
+      await taxHandler(mockRequest, mockResponse);
+
+      expect(mockStripe.tax.calculations.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          line_items: expect.arrayContaining([
+            expect.objectContaining({
+              tax_behavior: TAX_BEHAVIOR_EXCLUSIVE
             })
           ])
         })
@@ -388,7 +475,7 @@ describe('tax-calculator.controller.spec', () => {
 
       await taxHandler(mockRequest, mockResponse);
 
-      // Verify that Stripe was called without tax_behavior (letting Stripe determine automatically)
+      // Verify that Stripe was called without tax_behavior (letting Stripe use its default behavior)
       expect(mockStripe.tax.calculations.create).toHaveBeenCalledWith(
         expect.objectContaining({
           line_items: expect.arrayContaining([

@@ -30,10 +30,10 @@ export const taxHandler = async (request, response) => {
     const taxRequest = await mapCartRequestToTaxRequest(cartRequestBody);
     let actionItems;
     try {
-        logger.info(`Tax request to Stripe: ${JSON.stringify(taxRequest,null,2)}`);
+        logger.info(`Tax request sent to Stripe: ${JSON.stringify(taxRequest,null,2)}`);
         const stripeInstance = new stripe(configUtils.readConfiguration().stripeApiToken);
         calculation = await stripeInstance.tax.calculations.create(taxRequest);
-        logger.info(`Tax calculation from Stripe2: ${JSON.stringify(calculation,null,2)}`);
+        logger.info(`Tax calculation response from Stripe: ${JSON.stringify(calculation,null,2)}`);
         actionItems = await addUpdateCartLineItems(cartRequestBody.id, calculation);
     } catch (err) {
         logger.error(err);
@@ -92,22 +92,26 @@ async function mapCartRequestToTaxRequest(cartRequest) {
     taxRequest.customer_details.address.state = cartShippingAddress.state;
     taxRequest.customer_details.address_source = 'shipping';
 
-    // Determine tax behavior for each line item using the tax behavior service
+    // Determine tax behavior for the cart (applied to all line items)
     const taxBehaviors = await taxBehaviorService.determineTaxBehaviorForCart(cartRequest);
-    logger.info(`Tax behaviors determined: ${JSON.stringify(taxBehaviors)}`);
+    const cartTaxBehavior = taxBehaviors[cartRequest.lineItems[0]?.id]; // All line items have same behavior
+    
+    logger.info(`Cart tax behavior determined: ${cartTaxBehavior || 'Stripe default'}`);
+    
+    // Log the cart-level decision once for audit purposes
+    if (cartRequest.lineItems.length > 0) {
+        taxBehaviorService.logBehaviorDecision(cartRequest.lineItems[0], cartTaxBehavior, cartRequest);
+    }
     
     for (const cartLineItem of cartRequest.lineItems) {
         const lineItemBehavior = taxBehaviors[cartLineItem.id];
-        
-        // Log the decision for audit purposes
-        taxBehaviorService.logBehaviorDecision(cartLineItem, lineItemBehavior, cartRequest);
 
         let lineItemData = {};
         lineItemData.amount = cartLineItem.totalPrice?.centAmount;
         lineItemData.reference = cartLineItem.id;
         lineItemData.tax_code = "txcd_99999999";
 
-        // Only add tax_behavior if one was determined, otherwise let Stripe use automatic behavior
+        // Only add tax_behavior if one was determined, otherwise let Stripe use its default behavior
         if (lineItemBehavior) {
             lineItemData.tax_behavior = lineItemBehavior;
         }

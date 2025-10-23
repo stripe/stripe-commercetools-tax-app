@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.utils.js';
 import configUtils from '../utils/config.util.js';
+import { VALID_TAX_BEHAVIORS } from '../constants/tax-behavior.constants.js';
 
 class TaxBehaviorService {
   constructor() {
@@ -7,32 +8,32 @@ class TaxBehaviorService {
 
   /**
    * Determine tax behavior for cart line items with priority-based fallback logic
+   * Tax behavior is determined once at the cart level and applied to all line items
    * @param {Object} cartRequest - commercetools cart request
    * @returns {Object} Tax behavior configuration for each line item
    */
   async determineTaxBehaviorForCart(cartRequest) {
+    // Determine tax behavior once at cart level
+    const cartTaxBehavior = this.determineCartTaxBehavior(cartRequest);
+    
+    // Apply the same behavior to all line items
     const lineItemBehaviors = {};
-
     for (const lineItem of cartRequest.lineItems) {
-      const behavior = await this.determineTaxBehaviorForLineItem(
-        lineItem,
-        cartRequest
-      );
-      lineItemBehaviors[lineItem.id] = behavior;
+      lineItemBehaviors[lineItem.id] = cartTaxBehavior;
     }
 
     return lineItemBehaviors;
   }
 
   /**
-   * Core tax behavior determination logic for individual line items
+   * Determine tax behavior for the entire cart based on cart context
    * Priority order:
    * 1. Market/Store-based behavior (country mapping)
    * 2. Merchant-wide default configuration
    * 
-   * Returns null if no behavior is determined, letting Stripe use automatic behavior
+   * Returns null if no behavior is determined, letting Stripe use its own default behavior
    */
-  async determineTaxBehaviorForLineItem(lineItem, cartContext) {
+  determineCartTaxBehavior(cartContext) {
     // Priority 1: Market/Store-based behavior (country mapping)
     const marketBehavior = this.getMarketBasedBehavior(cartContext);
     if (marketBehavior) {
@@ -47,8 +48,8 @@ class TaxBehaviorService {
       return merchantBehavior;
     }
 
-    // No behavior determined - let Stripe use automatic behavior
-    logger.debug(`No tax behavior determined for product ${lineItem.productId}, letting Stripe determine automatically`);
+    // No behavior determined - let Stripe use its own default behavior
+    logger.debug(`No tax behavior determined for cart, letting Stripe use its default behavior`);
     return null;
   }
 
@@ -91,7 +92,7 @@ class TaxBehaviorService {
       logger.warn(`Error reading merchant tax behavior configuration: ${error.message}`);
     }
 
-    // No fallback - return null to let Stripe determine behavior
+    // No fallback - return null to let Stripe use its default behavior
     return null;
   }
 
@@ -118,8 +119,7 @@ class TaxBehaviorService {
    * Validate tax behavior value
    */
   isValidBehavior(behavior) {
-    const validBehaviors = ['inclusive', 'exclusive', 'automatic'];
-    return validBehaviors.includes(behavior?.toLowerCase());
+    return VALID_TAX_BEHAVIORS.includes(behavior?.toLowerCase());
   }
 
   /**
@@ -132,7 +132,7 @@ class TaxBehaviorService {
       assignedBehavior: behavior,
       currency: lineItem.totalPrice?.currencyCode,
       country: cartContext.country,
-      decisionReason: this.getDecisionReason(lineItem, cartContext, behavior),
+      decisionReason: this.getDecisionReason(cartContext, behavior),
       timestamp: new Date().toISOString()
     });
   }
@@ -140,7 +140,7 @@ class TaxBehaviorService {
   /**
    * Determine the reason for the tax behavior decision
    */
-  getDecisionReason(lineItem, cartContext, _behavior) {
+  getDecisionReason(cartContext, _behavior) {
     // Check if it came from country mapping
     if (this.getMarketBasedBehavior(cartContext)) {
       return 'country_mapping';
