@@ -11,6 +11,8 @@ import TaxErrorHandlerService from '../services/tax-error-handler.service.js';
 import { createStripeClient } from '../clients/stripe.client.js';
 import { taxBehaviorService } from '../services/tax-behavior.service.js';
 
+const CTP_TYPE_TAX_TXN_KEY = 'stripe-tax';
+
 export const taxHandler = async (request, response) => {
     let calculation;
 
@@ -54,6 +56,17 @@ export const taxHandler = async (request, response) => {
 async function addUpdateCartLineItems(cartId, calculation) {
     let actionItems = [];
 
+    actionItems.push({
+        action: "setCustomType",
+        type: {
+            key: `${CTP_TYPE_TAX_TXN_KEY}`,
+            typeId: "type"
+        },
+        fields: {
+            taxCalculationReference: calculation.id
+        }
+    });
+
     const taxRateDetails = calculation.tax_breakdown[0]?.tax_rate_details;
     const calculatedLineItems = calculation.line_items?.data;
     for (const lineItemTaxData of calculatedLineItems) {
@@ -77,10 +90,9 @@ async function addUpdateCartLineItems(cartId, calculation) {
     return actionItems;
 }
 
-async function mapCartRequestToTaxRequest(cartRequest) {
+function mapCartRequestToTaxRequest(cartRequest) {
     let taxRequest = {customer_details: {address: {}}, line_items: []};
 
-    
 
     let cartShippingAddress = {};
     if(cartRequest.shippingMode === 'Single'){
@@ -98,7 +110,7 @@ async function mapCartRequestToTaxRequest(cartRequest) {
     taxRequest.customer_details.address_source = 'shipping';
 
     // Determine tax behavior for the cart (applied to all line items)
-    const taxBehaviors = await taxBehaviorService.determineTaxBehaviorForCart(cartRequest);
+    const taxBehaviors = taxBehaviorService.determineTaxBehaviorForCart(cartRequest);
     const cartTaxBehavior = taxBehaviors[cartRequest.lineItems[0]?.id]; // All line items have same behavior
     
     logger.info(`Cart tax behavior determined: ${cartTaxBehavior || 'Stripe default'}`);

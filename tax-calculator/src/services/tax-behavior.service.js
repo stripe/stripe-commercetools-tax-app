@@ -12,7 +12,7 @@ class TaxBehaviorService {
    * @param {Object} cartRequest - commercetools cart request
    * @returns {Object} Tax behavior configuration for each line item
    */
-  async determineTaxBehaviorForCart(cartRequest) {
+  determineTaxBehaviorForCart(cartRequest) {
     // Determine tax behavior once at cart level
     const cartTaxBehavior = this.determineCartTaxBehavior(cartRequest);
     
