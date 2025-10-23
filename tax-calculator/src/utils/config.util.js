@@ -16,7 +16,8 @@ function readConfiguration() {
     projectKey: process.env.CTP_PROJECT_KEY,
     scope: process.env.CTP_SCOPE,
     region: process.env.CTP_REGION,
-    stripeApiToken: process.env.TAX_PROVIDER_API_TOKEN
+    stripeApiToken: process.env.TAX_PROVIDER_API_TOKEN,
+    taxCodeMapping: process.env.TAX_CODE_MAPPING_JSON
   };
 
   const validationErrors = getValidateMessages(envValidators, envVars);

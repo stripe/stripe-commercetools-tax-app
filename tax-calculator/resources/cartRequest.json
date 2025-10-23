@@ -20,7 +20,41 @@
             "currencyCode": "EUR",
             "centAmount": 34500,
             "fractionDigits": 2
-          }
+          },
+          "categories": [
+            {
+              "id": "cat-electronics-123",
+              "key": "electronics",
+              "name": {
+                "en-US": "Electronics"
+              },
+              "custom": {
+                "type": {
+                  "typeId": "type",
+                  "id": "connector-category-tax-stripe"
+                },
+                "fields": {
+                  "connectorStripeTax_TaxCode": "txcd_99999999"
+                }
+              },
+              "parent": {
+                "id": "cat-parent-456",
+                "key": "parent-category",
+                "name": {
+                  "en-US": "Parent Category"
+                },
+                "custom": {
+                  "type": {
+                    "typeId": "type",
+                    "id": "connector-category-tax-stripe"
+                  },
+                  "fields": {
+                    "connectorStripeTax_TaxCode": "txcd_88888888"
+                  }
+                }
+              }
+            }
+          ]
         },
         {
           "id": "stripe-tax-calculator-lineItem-2",
@@ -35,7 +69,25 @@
             "currencyCode": "EUR",
             "centAmount": 45000,
             "fractionDigits": 2
-          }
+          },
+          "categories": [
+            {
+              "id": "cat-accessories-789",
+              "key": "accessories",
+              "name": {
+                "en-US": "Accessories"
+              },
+              "custom": {
+                "type": {
+                  "typeId": "type",
+                  "id": "connector-category-tax-stripe"
+                },
+                "fields": {
+                  "connectorStripeTax_TaxCode": "txcd_99999999"
+                }
+              }
+            }
+          ]
         }
       ],
       "totalPrice": {
@@ -49,6 +101,31 @@
         "country": "DE",
         "streetName": "testStreet",
         "postal_code": "12345"
+      },
+      "shippingInfo": {
+        "shippingMethod": {
+          "id": "shipping-method-123",
+          "typeId": "shipping-method",
+          "obj": {
+            "id": "shipping-method-123",
+            "name": "Standard Shipping",
+            "custom": {
+              "type": {
+                "typeId": "type",
+                "id": "connector-shipping-tax-stripe"
+              },
+                "fields": {
+                  "connectorStripeTax_TaxCode": "txcd_92010001"
+                }
+            }
+          }
+        },
+        "price": {
+          "type": "centPrecision",
+          "currencyCode": "EUR",
+          "centAmount": 1000,
+          "fractionDigits": 2
+        }
       },
       "customLineItems": [],
       "discountCodes": [],

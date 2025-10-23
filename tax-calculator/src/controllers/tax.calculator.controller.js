@@ -1,21 +1,21 @@
 import _ from 'lodash';
-import stripe from 'stripe';
 import {logger} from '../utils/logger.utils.js';
 import {
     HTTP_STATUS_BAD_REQUEST,
-    HTTP_STATUS_SERVER_ERROR,
     HTTP_STATUS_SUCCESS_ACCEPTED,
 } from '../constants/http.status.constants.js';
 
 import CustomError from '../errors/custom.error.js';
-import configUtils from '../utils/config.util.js';
+//import { validateCartAddress } from '../validators/address.validator.js';
+import taxCodeService from '../services/tax-code.service.js';
+import TaxErrorHandlerService from '../services/tax-error-handler.service.js';
+import { createStripeClient } from '../clients/stripe.client.js';
 
 const CTP_TYPE_TAX_TXN_KEY = 'stripe-tax';
 
 export const taxHandler = async (request, response) => {
     let calculation;
 
-    logger.info(`request body: ${JSON.stringify(request.body)}`);
     logger.info(`request body: ${JSON.stringify(request.body)}`);
     const cartRequestBody = request.body?.resource?.obj;
     if (_.isEmpty(cartRequestBody)) {
@@ -29,18 +29,23 @@ export const taxHandler = async (request, response) => {
             );
     }
     logger.info(`Cart request body: ${JSON.stringify(cartRequestBody,null,2)}`);
-    const taxRequest = mapCartRequestToTaxRequest(cartRequestBody);
+
+    let taxRequest;
     let actionItems;
     try {
+        // Map cart to tax request - may throw TaxCodeNotFoundError
+        // This validates that all line items have valid tax codes
+        taxRequest = mapCartRequestToTaxRequest(cartRequestBody);
+
         logger.info(`Tax request to Stripe: ${JSON.stringify(taxRequest,null,2)}`);
-        const stripeInstance = new stripe(configUtils.readConfiguration().stripeApiToken);
-        calculation = await stripeInstance.tax.calculations.create(taxRequest);
-        logger.info(`Tax calculation from Stripe2: ${JSON.stringify(calculation,null,2)}`);
+        const stripeClient = createStripeClient();
+
+        // Call Stripe Tax API - may throw errors for unsupported countries or missing tax rates
+        calculation = await stripeClient.tax.calculations.create(taxRequest);
+        logger.info(`Tax calculation from Stripe: ${JSON.stringify(calculation,null,2)}`);
         actionItems = await addUpdateCartLineItems(cartRequestBody.id, calculation);
     } catch (err) {
-        logger.error(err);
-        if (err.statusCode) return response.status(err.statusCode).send(err);
-        return response.status(HTTP_STATUS_SERVER_ERROR).send(err);
+        return TaxErrorHandlerService.handleTaxCalculationError(err, request, response, cartRequestBody);
     }
 
     return response.status(HTTP_STATUS_SUCCESS_ACCEPTED).send(
@@ -106,16 +111,45 @@ function mapCartRequestToTaxRequest(cartRequest) {
     taxRequest.customer_details.address_source = 'shipping';
 
     for (const cartLineItem of cartRequest.lineItems) {
-
         let lineItemData = {};
         lineItemData.amount = cartLineItem.totalPrice?.centAmount;
         lineItemData.reference = cartLineItem.id;
-        lineItemData.tax_code = "txcd_99999999";
+
+        // Get tax code dynamically using tax code service
+        lineItemData.tax_code = taxCodeService.getTaxCodeForProduct(cartLineItem);
 
         taxRequest.line_items.push(lineItemData);
     }
 
+    taxRequest.shipping_cost = mapShippingInfoToTaxRequest(cartRequest);
+
     taxRequest.expand = ['line_items']
 
     return taxRequest;
+}
+
+function mapShippingInfoToTaxRequest(cartRequest) {
+    let shipping_cost = {};
+    
+    shipping_cost.tax_behavior = 'exclusive';
+    
+    if (cartRequest.shippingMode === 'Single') {
+        if (cartRequest.shippingInfo) {
+            shipping_cost.amount = cartRequest.shippingInfo?.price?.centAmount;
+            const taxCode = taxCodeService.getShippingTaxCodeFromShippingInfo(cartRequest.shippingInfo, cartRequest.shippingMode);
+            if (taxCode) {
+                shipping_cost.tax_code = taxCode;
+            }
+        }
+    } else if (cartRequest.shippingMode === 'Multiple') {
+        if (cartRequest.shipping && cartRequest.shipping.length > 0) {
+            const {price, taxCode} = taxCodeService.getShippingPriceAndTaxCodeFromShipping(cartRequest.shipping, cartRequest.shippingMode);
+            if (price) {
+                shipping_cost.amount = price;
+                shipping_cost.tax_code = taxCode;
+            }
+        }
+    }
+    
+    return shipping_cost;
 }
