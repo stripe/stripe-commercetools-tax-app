@@ -1,10 +1,10 @@
 import { expect, describe, it, jest, beforeEach } from '@jest/globals';
-import { taxBehaviorService } from '../../../src/services/tax-behavior.service.js';
-import configUtils from '../../../src/utils/config.util.js';
-import { TAX_BEHAVIOR_INCLUSIVE, TAX_BEHAVIOR_EXCLUSIVE } from '../../../src/constants/tax-behavior.constants.js';
+import { taxBehaviorService } from '../../src/services/tax-behavior.service.js';
+import configUtils from '../../src/utils/config.util.js';
+import { TAX_BEHAVIOR_INCLUSIVE, TAX_BEHAVIOR_EXCLUSIVE } from '../../src/constants/tax-behavior.constants.js';
 
 // Mock the config utils
-jest.mock('../../../src/utils/config.util.js');
+jest.mock('../../src/utils/config.util.js');
 
 describe('TaxBehaviorService', () => {
   beforeEach(() => {
