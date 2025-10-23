@@ -6,7 +6,6 @@ import bodyParser from 'body-parser';
 // Import routes
 import taxCalculatorRouter from './routes/tax.calculator.route.js';
 import { logger } from './utils/logger.utils.js';
-
 const PORT = 8081;
 
 // Create the express app
@@ -21,7 +20,8 @@ app.use('/', taxCalculatorRouter);
 
 // Listen the application
 const server = app.listen(PORT, () => {
-  logger.info(`⚡️ Event application listening on port ${PORT}`);
+  logger.info(`Tax Calculator service listening on port ${PORT}`);
+  logger.info('Tax Calculator service started successfully');
 });
 
 export default server;

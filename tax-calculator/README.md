@@ -11,31 +11,31 @@ The default key is 'ctpTaxCalculatorExtension'.
 #### Install your tax-provider SDK 
 Please run following npm command under order-syncer folder to install the NodeJS SDK provided by tax provider.
 
-```
+```bash
 $ npm install <tax-provider-sdk>
 ```
 #### Install dependencies
-```
+```bash
 $ npm install
 ```
 #### Run unit test
-```
+```bash
 $ npm run test:unit
 ```
 #### Run integration test
-```
+```bash
 $ npm run test:integration
 ```
 #### Run the application in local environment
-```
+```bash
 $ npm run start
 ```
 #### Run post-deploy script in local environment
-```
+```bash
 $ npm run connector:post-deploy
 ```
 #### Run pre-undeploy script in local environment
-```
+```bash
 $ npm run connector:pre-undeploy
 ```
 
