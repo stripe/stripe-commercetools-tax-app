@@ -7,7 +7,7 @@ import {
   CATEGORY_TAX_CUSTOM_TYPE,
   SHIPPING_TAX_CUSTOM_TYPE,
 } from './customTypes.js';
-import extensionTemplate from "./../../resources/api-extension.json" with { type: 'json' };
+import extensionTemplate from "./../../resources/api-extension.json"
 
 export async function createCTPExtension(
   apiRoot,
