@@ -3,7 +3,10 @@ import {
   standardString,
   standardKey,
   region,
+  taxBehavior,
+  jsonObject,
 } from './helpers.validators.js';
+import { VALID_TAX_BEHAVIORS } from '../constants/tax-behavior.constants.js';
 
 /**
  * Create here your own validators
@@ -48,6 +51,18 @@ const envValidators = [
   region(['region'], {
     code: 'InvalidRegion',
     message: 'Not a valid region.',
+    referencedBy: 'environmentVariables',
+  }),
+
+  optional(taxBehavior)(['taxBehaviorDefault'], {
+    code: 'InvalidTaxBehaviorDefault',
+    message: `Tax behavior default should be one of: ${VALID_TAX_BEHAVIORS.join(', ')}.`,
+    referencedBy: 'environmentVariables',
+  }),
+
+  optional(jsonObject)(['countryTaxBehaviorMapping'], {
+    code: 'InvalidCountryTaxBehaviorMapping',
+    message: 'Country tax behavior mapping should be valid JSON object.',
     referencedBy: 'environmentVariables',
   }),
 ];

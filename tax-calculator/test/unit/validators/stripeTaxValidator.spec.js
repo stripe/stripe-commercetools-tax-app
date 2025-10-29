@@ -1,5 +1,6 @@
 import { expect, describe, it, jest, beforeEach, afterEach } from '@jest/globals';
 import { StripeTaxValidator, validateStripeTax } from '../../../src/validators/stripeTaxValidator.js';
+import { TAX_BEHAVIOR_INCLUSIVE } from '../../../src/constants/tax-behavior.constants.js';
 
 // Mock the stripe module
 jest.mock('stripe', () => {
@@ -46,7 +47,7 @@ describe('stripeTaxValidator.spec', () => {
         status: 'active',
         head_office: { address: '123 Main St' },
         defaults: {
-          tax_behavior: 'inclusive',
+          tax_behavior: TAX_BEHAVIOR_INCLUSIVE,
           tax_code: 'txcd_123456'
         }
       };
@@ -172,7 +173,7 @@ describe('stripeTaxValidator.spec', () => {
     it('should set TAX_BEHAVIOR_DEFAULT when not already set', () => {
       const settings = {
         defaults: {
-          tax_behavior: 'inclusive',
+          tax_behavior: TAX_BEHAVIOR_INCLUSIVE,
           tax_code: 'txcd_123456'
         }
       };
@@ -182,13 +183,13 @@ describe('stripeTaxValidator.spec', () => {
 
       validator.autoPopulateDefaults(settings);
 
-      expect(process.env.TAX_BEHAVIOR_DEFAULT).toBe('inclusive');
+      expect(process.env.TAX_BEHAVIOR_DEFAULT).toBe(TAX_BEHAVIOR_INCLUSIVE);
     });
 
     it('should set TAX_CODE_DEFAULT when not already set', () => {
       const settings = {
         defaults: {
-          tax_behavior: 'inclusive',
+          tax_behavior: TAX_BEHAVIOR_INCLUSIVE,
           tax_code: 'txcd_123456'
         }
       };
@@ -204,7 +205,7 @@ describe('stripeTaxValidator.spec', () => {
     it('should not override existing TAX_BEHAVIOR_DEFAULT', () => {
       const settings = {
         defaults: {
-          tax_behavior: 'inclusive',
+          tax_behavior: TAX_BEHAVIOR_INCLUSIVE,
           tax_code: 'txcd_123456'
         }
       };
@@ -220,7 +221,7 @@ describe('stripeTaxValidator.spec', () => {
     it('should not override existing TAX_CODE_DEFAULT', () => {
       const settings = {
         defaults: {
-          tax_behavior: 'inclusive',
+          tax_behavior: TAX_BEHAVIOR_INCLUSIVE,
           tax_code: 'txcd_123456'
         }
       };
@@ -260,7 +261,7 @@ describe('stripeTaxValidator.spec', () => {
 
       validator.autoPopulateDefaults(settings);
 
-      expect(process.env.TAX_BEHAVIOR_DEFAULT).toBe('inclusive');
+      expect(process.env.TAX_BEHAVIOR_DEFAULT).toBe(TAX_BEHAVIOR_INCLUSIVE);
       expect(process.env.TAX_CODE_DEFAULT).toBeUndefined();
     });
   });

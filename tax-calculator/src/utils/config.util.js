@@ -17,7 +17,9 @@ function readConfiguration() {
     scope: process.env.CTP_SCOPE,
     region: process.env.CTP_REGION,
     stripeApiToken: process.env.TAX_PROVIDER_API_TOKEN,
-    taxCodeMapping: process.env.TAX_CODE_MAPPING_JSON
+    taxCodeMapping: process.env.TAX_CODE_MAPPING_JSON,
+    taxBehaviorDefault: process.env.TAX_BEHAVIOR_DEFAULT,
+    countryTaxBehaviorMapping: process.env.COUNTRY_TAX_BEHAVIOR_MAPPING
   };
 
   const validationErrors = getValidateMessages(envValidators, envVars);

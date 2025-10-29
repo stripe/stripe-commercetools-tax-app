@@ -54,3 +54,75 @@ For details, please refer [here](https://docs.commercetools.com/tutorials/extens
 Before starting the development, we advise users to create a .env file in order to help them in local development.
       
 Refer [here](https://github.com/commercetools/connect-tax-integration-template/tree/fix-documentation#deployment-configuration) for more details about the environment variables required for tax-calculator application to run.
+
+## Tax Behavior Configuration
+
+The tax calculator supports configurable tax behavior to ensure accurate tax display and calculation based on regional practices, product types, and merchant preferences.
+
+### Overview
+
+Tax behavior determines how tax is calculated and displayed to customers, which is critical for providing accurate pricing expectations and compliance with regional tax display requirements.
+
+### Tax Behavior Options
+
+#### 1. Inclusive
+- Tax is already included in the listed price
+- Customer pays: List Price (which includes tax)
+- Common in Europe, Australia, many other regions
+- Often required by law for B2C transactions
+
+#### 2. Exclusive
+- Tax is added on top of the listed price
+- Customer pays: List Price + Tax
+- Common in North America (US, Canada)
+- Preferred for B2B transactions
+
+#### 3. Stripe Default
+- If no behavior is determined, Stripe will use its own default behavior
+- Stripe's automatic behavior varies by currency and region
+
+### Configuration Levels
+
+The tax behavior is determined using the following priority order:
+
+1. **Country Mapping** - If `COUNTRY_TAX_BEHAVIOR_MAPPING` is configured and the shipping country matches a country in the mapping, that behavior is used
+2. **Merchant Default** - Falls back to `TAX_BEHAVIOR_DEFAULT` value (if configured)
+3. **Stripe Default** - If no behavior is determined, Stripe will use its own default behavior
+
+### Environment Variables
+
+#### TAX_BEHAVIOR_DEFAULT
+Sets the default tax behavior for all tax calculations when no other rules apply.
+
+**Valid values:**
+- `inclusive` - Tax is included in the displayed price
+- `exclusive` - Tax is added on top of the displayed price
+
+**Example:**
+```bash
+TAX_BEHAVIOR_DEFAULT=exclusive
+```
+
+> **_NOTE:_** If this environment variable isn't set, then the post-deploy script of the connector will attempt to fetch a default setting from some PSP Tax Providers, such as Stripe. See [Stripe Tax Behavior Settings](https://docs.stripe.com/tax/products-prices-tax-codes-tax-behavior#tax-behavior)
+
+#### COUNTRY_TAX_BEHAVIOR_MAPPING
+JSON object mapping country codes to their default tax behavior. This allows different tax behaviors for different markets.
+
+**Optional:** If not provided, the system will skip country-based behavior determination and proceed to merchant default.
+
+**Format:**
+```json
+{
+  "US": "exclusive",
+  "CA": "exclusive", 
+  "DE": "inclusive",
+  "FR": "inclusive",
+  "AU": "inclusive",
+  "GB": "inclusive"
+}
+```
+
+**Example:**
+```bash
+COUNTRY_TAX_BEHAVIOR_MAPPING='{"US":"exclusive","DE":"inclusive","FR":"inclusive"}'
+```

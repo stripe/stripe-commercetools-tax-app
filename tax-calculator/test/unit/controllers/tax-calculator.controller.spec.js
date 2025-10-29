@@ -1,9 +1,13 @@
-import {expect, describe, it, jest} from '@jest/globals';
+import {expect, describe, it, jest, beforeEach} from '@jest/globals';
 import configUtil from '../../../src/utils/config.util.js';
 import { HTTP_STATUS_BAD_REQUEST } from '../../../src/constants/http.status.constants.js';
 import {taxHandler} from "../../../src/controllers/tax.calculator.controller.js";
 
 describe('tax-calculator.controller.spec', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   it(`should return 400 HTTP status when message data is missing in incoming event message.`, async () => {
     const dummyConfig = {
       clientId: 'dummy-ctp-client-id',
@@ -37,5 +41,4 @@ describe('tax-calculator.controller.spec', () => {
     await taxHandler(mockRequest, mockResponse);
     expect(responseStatusSpy).toBeCalledWith(HTTP_STATUS_BAD_REQUEST);
   });
-
 });

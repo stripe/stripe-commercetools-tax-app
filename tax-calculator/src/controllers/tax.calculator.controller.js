@@ -6,10 +6,10 @@ import {
 } from '../constants/http.status.constants.js';
 
 import CustomError from '../errors/custom.error.js';
-//import { validateCartAddress } from '../validators/address.validator.js';
 import taxCodeService from '../services/tax-code.service.js';
 import TaxErrorHandlerService from '../services/tax-error-handler.service.js';
 import { createStripeClient } from '../clients/stripe.client.js';
+import { taxBehaviorService } from '../services/tax-behavior.service.js';
 import updateActionService from '../services/update-action.service.js';
 
 export const taxHandler = async (request, response) => {
@@ -55,7 +55,6 @@ export const taxHandler = async (request, response) => {
 function mapCartRequestToTaxRequest(cartRequest) {
     let taxRequest = {customer_details: {address: {}}, line_items: []};
 
-    
 
     let cartShippingAddress = {};
     if(cartRequest.shippingMode === 'Single'){
@@ -72,13 +71,34 @@ function mapCartRequestToTaxRequest(cartRequest) {
     taxRequest.customer_details.address.state = cartShippingAddress.state;
     taxRequest.customer_details.address_source = 'shipping';
 
+    // Determine tax behavior for the cart (applied to all line items)
+    const taxBehaviors = taxBehaviorService.determineTaxBehaviorForCart(cartRequest);
+    const cartTaxBehavior = taxBehaviors[cartRequest.lineItems[0]?.id]; // All line items have same behavior
+    
+    logger.info(
+        cartTaxBehavior
+            ? `Cart tax behavior determined: ${cartTaxBehavior}`
+            : 'No cart tax behavior was determined; no behavior will be set on the line items, letting Stripe use its default behavior'
+    );
+    
+    // Log the cart-level decision once for audit purposes
+    if (cartRequest.lineItems.length > 0) {
+        taxBehaviorService.logBehaviorDecision(cartRequest.lineItems[0], cartTaxBehavior, cartRequest);
+    }
+    
     for (const cartLineItem of cartRequest.lineItems) {
+        const lineItemBehavior = taxBehaviors[cartLineItem.id];
         let lineItemData = {};
         lineItemData.amount = cartLineItem.totalPrice?.centAmount;
         lineItemData.reference = cartLineItem.id;
 
         // Get tax code dynamically using tax code service
         lineItemData.tax_code = taxCodeService.getTaxCodeForProduct(cartLineItem);
+
+        // Only add tax_behavior if one was determined, otherwise let Stripe use its default behavior
+        if (lineItemBehavior) {
+            lineItemData.tax_behavior = lineItemBehavior;
+        }
 
         taxRequest.line_items.push(lineItemData);
     }

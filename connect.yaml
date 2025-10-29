@@ -9,6 +9,12 @@ deployAs:
       standardConfiguration:
         - key: CTP_REGION
           description: region of commercetools composable commerce project
+        - key: TAX_BEHAVIOR_DEFAULT
+          description: Sets the default tax behavior for all tax calculations when no other rules apply
+        - key: COUNTRY_TAX_BEHAVIOR_MAPPING
+          description: JSON string (with escaped double quotes) mapping country codes to their default tax behavior
+        - key: TAX_CODE_MAPPING_JSON
+          description: JSON string (with escaped double quotes) mapping commercetools categories to Stripe tax codes                   
       securedConfiguration:
         - key: CTP_PROJECT_KEY
           description: project key from commercetools composable commerce project
