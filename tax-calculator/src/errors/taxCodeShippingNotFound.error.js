@@ -1,4 +1,4 @@
-import { TAX_CODE_CUSTOM_TYPE_NAME } from "../connectors/customTypes";
+import { TAX_CODE_CUSTOM_TYPE_NAME } from "../connectors/customTypes.js";
 
 /**
  * Custom error thrown when no tax code can be determined for a shipping method

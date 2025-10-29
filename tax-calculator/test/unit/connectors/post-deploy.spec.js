@@ -6,7 +6,8 @@ jest.mock('../../../src/clients/create.client.js', () => ({
 }));
 
 jest.mock('../../../src/connectors/action.js', () => ({
-  createCTPExtension: jest.fn()
+  createCTPExtension: jest.fn(),
+  createCustomTypes: jest.fn()
 }));
 
 jest.mock('../../../src/validators/stripeTaxValidator.js', () => ({

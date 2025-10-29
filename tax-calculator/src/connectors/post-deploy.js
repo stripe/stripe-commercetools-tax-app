@@ -78,7 +78,7 @@ export async function run() {
     const properties = new Map(Object.entries(process.env));
     await postDeploy(properties);
   } catch (error) {
-    process.stderr.write(`Post-deploy failed: ${error.message}\n`);
+    process.stderr.write(`Post-deploy failed: ${error.message}\n${error.stack}\n`);
     process.exitCode = 1;
   }
 }

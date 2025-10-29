@@ -1,4 +1,5 @@
 import validator from 'validator';
+import { VALID_TAX_BEHAVIORS } from '../constants/tax-behavior.constants.js';
 
 /**
  * File used to create helpers to validate the fields
@@ -135,6 +136,36 @@ export const region = (path, message) => [
           ])
         )
       ),
+      message,
+    ],
+  ],
+];
+
+export const taxBehavior = (path, message) => [
+  path,
+  [
+    [
+      required((value) =>
+        validator.isIn(value?.toLowerCase(), VALID_TAX_BEHAVIORS)
+      ),
+      message,
+    ],
+  ],
+];
+
+export const jsonObject = (path, message) => [
+  path,
+  [
+    [
+      (value) => {
+        if (value === undefined || value === null) return true; 
+        try {
+          const parsed = JSON.parse(value);
+          return typeof parsed === 'object' && !Array.isArray(parsed);
+        } catch {
+          return false;
+        }
+      },
       message,
     ],
   ],
