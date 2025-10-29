@@ -1,13 +1,13 @@
 import _ from 'lodash';
 import { serializeError } from 'serialize-error';
 import { logger } from '../utils/logger.utils.js';
+import extensionTemplate from "./../../resources/api-extension.json" with { type: 'json' };
 import {
   TAX_CODE_CUSTOM_TYPE_NAME,
   PRODUCT_TAX_CUSTOM_TYPE,
   CATEGORY_TAX_CUSTOM_TYPE,
   SHIPPING_TAX_CUSTOM_TYPE,
 } from './customTypes.js';
-import extensionTemplate from "./../../resources/api-extension.json"
 
 export async function createCTPExtension(
   apiRoot,
