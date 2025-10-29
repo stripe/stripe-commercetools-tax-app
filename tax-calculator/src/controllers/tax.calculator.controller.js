@@ -10,8 +10,7 @@ import CustomError from '../errors/custom.error.js';
 import taxCodeService from '../services/tax-code.service.js';
 import TaxErrorHandlerService from '../services/tax-error-handler.service.js';
 import { createStripeClient } from '../clients/stripe.client.js';
-
-const CTP_TYPE_TAX_TXN_KEY = 'stripe-tax';
+import updateActionService from '../services/update-action.service.js';
 
 export const taxHandler = async (request, response) => {
     let calculation;
@@ -43,7 +42,7 @@ export const taxHandler = async (request, response) => {
         // Call Stripe Tax API - may throw errors for unsupported countries or missing tax rates
         calculation = await stripeClient.tax.calculations.create(taxRequest);
         logger.info(`Tax calculation from Stripe: ${JSON.stringify(calculation,null,2)}`);
-        actionItems = await addUpdateCartLineItems(cartRequestBody.id, calculation);
+        actionItems = updateActionService.createCartUpdateActionsFromTaxCalculation(calculation);
     } catch (err) {
         return TaxErrorHandlerService.handleTaxCalculationError(err, request, response, cartRequestBody);
     }
@@ -52,43 +51,6 @@ export const taxHandler = async (request, response) => {
         { actions: actionItems }
     );
 };
-
-async function addUpdateCartLineItems(cartId, calculation) {
-    let actionItems = [];
-
-    actionItems.push({
-        action: "setCustomType",
-        type: {
-            key: `${CTP_TYPE_TAX_TXN_KEY}`,
-            typeId: "type"
-        },
-        fields: {
-            taxCalculationReference: calculation.id
-        }
-    });
-
-    const taxRateDetails = calculation.tax_breakdown[0]?.tax_rate_details;
-    const calculatedLineItems = calculation.line_items?.data;
-    for (const lineItemTaxData of calculatedLineItems) {
-        actionItems.push({
-            action: "setLineItemTaxAmount",
-            lineItemId: lineItemTaxData.reference,
-            externalTaxAmount: {
-                totalGross: {
-                    currencyCode: calculation.currency?.toUpperCase(),
-                    centAmount: lineItemTaxData.amount_tax
-                },
-                taxRate: {
-                    name: taxRateDetails?.tax_type,
-                    amount: parseFloat(taxRateDetails?.percentage_decimal/100),
-                    country: taxRateDetails?.country
-                }
-            }
-        });
-    }
-
-    return actionItems;
-}
 
 function mapCartRequestToTaxRequest(cartRequest) {
     let taxRequest = {customer_details: {address: {}}, line_items: []};
