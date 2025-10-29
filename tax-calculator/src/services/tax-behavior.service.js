@@ -28,17 +28,17 @@ class TaxBehaviorService {
   /**
    * Determine tax behavior for the entire cart based on cart context
    * Priority order:
-   * 1. Market/Store-based behavior (country mapping)
+   * 1. Country-based behavior (country mapping)
    * 2. Merchant-wide default configuration
    * 
    * Returns null if no behavior is determined, letting Stripe use its own default behavior
    */
   determineCartTaxBehavior(cartContext) {
-    // Priority 1: Market/Store-based behavior (country mapping)
-    const marketBehavior = this.getMarketBasedBehavior(cartContext);
-    if (marketBehavior) {
-      logger.debug(`Using market-based tax behavior for country ${cartContext.country}: ${marketBehavior}`);
-      return marketBehavior;
+    // Priority 1: Country-based behavior (country mapping)
+    const countryBehavior = this.getCountryBasedBehavior(cartContext);
+    if (countryBehavior) {
+      logger.debug(`Using country-based tax behavior for country ${cartContext.country}: ${countryBehavior}`);
+      return countryBehavior;
     }
 
     // Priority 2: Merchant-wide default configuration
@@ -55,9 +55,9 @@ class TaxBehaviorService {
 
 
   /**
-   * Get tax behavior based on market/store configuration (country mapping)
+   * Get tax behavior based on country mapping configuration
    */
-  getMarketBasedBehavior(cartContext) {
+  getCountryBasedBehavior(cartContext) {
     const countryCode = cartContext.country;
     if (!countryCode) {
       return null;
@@ -142,7 +142,7 @@ class TaxBehaviorService {
    */
   getDecisionReason(cartContext, _behavior) {
     // Check if it came from country mapping
-    if (this.getMarketBasedBehavior(cartContext)) {
+    if (this.getCountryBasedBehavior(cartContext)) {
       return 'country_mapping';
     }
 

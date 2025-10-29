@@ -114,7 +114,7 @@ describe('TaxBehaviorService', () => {
     });
   });
 
-  describe('getMarketBasedBehavior', () => {
+  describe('getCountryBasedBehavior', () => {
     it('should return behavior from country mapping', () => {
       const cartContext = { country: 'DE' };
       
@@ -122,7 +122,7 @@ describe('TaxBehaviorService', () => {
         countryTaxBehaviorMapping: '{"DE":"inclusive","US":"exclusive"}'
       });
 
-      const result = taxBehaviorService.getMarketBasedBehavior(cartContext);
+      const result = taxBehaviorService.getCountryBasedBehavior(cartContext);
 
       expect(result).toBe(TAX_BEHAVIOR_INCLUSIVE);
     });
@@ -134,7 +134,7 @@ describe('TaxBehaviorService', () => {
         countryTaxBehaviorMapping: '{"DE":"inclusive","US":"exclusive"}'
       });
 
-      const result = taxBehaviorService.getMarketBasedBehavior(cartContext);
+      const result = taxBehaviorService.getCountryBasedBehavior(cartContext);
 
       expect(result).toBeNull();
     });
@@ -146,7 +146,7 @@ describe('TaxBehaviorService', () => {
         countryTaxBehaviorMapping: 'invalid-json'
       });
 
-      const result = taxBehaviorService.getMarketBasedBehavior(cartContext);
+      const result = taxBehaviorService.getCountryBasedBehavior(cartContext);
 
       expect(result).toBeNull();
     });
@@ -183,7 +183,7 @@ describe('TaxBehaviorService', () => {
   });
 
   describe('getDecisionReason', () => {
-    it('should return country_mapping when market behavior is available', () => {
+    it('should return country_mapping when country behavior is available', () => {
       const cartContext = { country: 'DE' };
       
       configUtils.readConfiguration.mockReturnValue({
@@ -195,7 +195,7 @@ describe('TaxBehaviorService', () => {
       expect(result).toBe('country_mapping');
     });
 
-    it('should return merchant_default when no market behavior', () => {
+    it('should return merchant_default when no country behavior', () => {
       const cartContext = { country: 'US' };
       
       configUtils.readConfiguration.mockReturnValue({

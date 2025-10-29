@@ -113,7 +113,11 @@ function mapCartRequestToTaxRequest(cartRequest) {
     const taxBehaviors = taxBehaviorService.determineTaxBehaviorForCart(cartRequest);
     const cartTaxBehavior = taxBehaviors[cartRequest.lineItems[0]?.id]; // All line items have same behavior
     
-    logger.info(`Cart tax behavior determined: ${cartTaxBehavior || 'Stripe default'}`);
+    logger.info(
+        cartTaxBehavior
+            ? `Cart tax behavior determined: ${cartTaxBehavior}`
+            : 'No cart tax behavior was determined; no behavior will be set on the line items, letting Stripe use its default behavior'
+    );
     
     // Log the cart-level decision once for audit purposes
     if (cartRequest.lineItems.length > 0) {
