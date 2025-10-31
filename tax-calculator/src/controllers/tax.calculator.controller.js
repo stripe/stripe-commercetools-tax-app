@@ -119,14 +119,14 @@ async function mapCartRequestToTaxRequest(cartRequest) {
         taxRequest.line_items.push(lineItemData);
     }
 
-    taxRequest.shipping_cost = mapShippingInfoToTaxRequest(cartRequest);
+    taxRequest.shipping_cost = await mapShippingInfoToTaxRequest(cartRequest);
 
     taxRequest.expand = ['line_items']
 
     return taxRequest;
 }
 
-function mapShippingInfoToTaxRequest(cartRequest) {
+async function mapShippingInfoToTaxRequest(cartRequest) {
     let shipping_cost = {};
     
     shipping_cost.tax_behavior = 'exclusive';
@@ -134,14 +134,14 @@ function mapShippingInfoToTaxRequest(cartRequest) {
     if (cartRequest.shippingMode === 'Single') {
         if (cartRequest.shippingInfo) {
             shipping_cost.amount = cartRequest.shippingInfo?.price?.centAmount;
-            const taxCode = taxCodeService.getShippingTaxCodeFromShippingInfo(cartRequest.shippingInfo, cartRequest.shippingMode);
+            const taxCode = await taxCodeService.getShippingTaxCodeFromShippingInfo(cartRequest.shippingInfo, cartRequest.shippingMode);
             if (taxCode) {
                 shipping_cost.tax_code = taxCode;
             }
         }
     } else if (cartRequest.shippingMode === 'Multiple') {
         if (cartRequest.shipping && cartRequest.shipping.length > 0) {
-            const {price, taxCode} = taxCodeService.getShippingPriceAndTaxCodeFromShipping(cartRequest.shipping, cartRequest.shippingMode);
+            const {price, taxCode} = await taxCodeService.getShippingPriceAndTaxCodeFromShipping(cartRequest.shipping, cartRequest.shippingMode);
             if (price) {
                 shipping_cost.amount = price;
                 shipping_cost.tax_code = taxCode;

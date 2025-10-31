@@ -3,6 +3,7 @@ import taxCodeMappingConfig from '../config/taxCodeMapping.config.js';
 import TaxCodeNotFoundError from '../errors/taxCodeNotFound.error.js';
 import TaxCodeShippingNotFoundError from '../errors/taxCodeShippingNotFound.error.js';
 import { TAX_CODE_CUSTOM_TYPE_NAME } from '../connectors/customTypes.js';
+import { createApiRoot } from '../clients/create.client.js';
 
 /**
  * Tax Code Service
@@ -259,10 +260,12 @@ class TaxCodeService {
    * @returns {string} Shipping tax code
    * @throws {TaxCodeShippingNotFoundError} If no tax code can be determined
    */
-  getShippingTaxCodeFromShippingInfo(shippingInfo, shippingMode) {
+  async getShippingTaxCodeFromShippingInfo(shippingInfo, shippingMode) {
     try {
       // Step 1: Check custom type
-      const customTypeShippingTaxCode = shippingInfo?.shippingMethod?.obj?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
+      const shippingMethod = await this.getShippingMethodById(shippingInfo.shippingMethod.id);
+
+      const customTypeShippingTaxCode = shippingMethod?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
       if (customTypeShippingTaxCode) {
         return customTypeShippingTaxCode;
       }
@@ -271,7 +274,7 @@ class TaxCodeService {
         throw new TaxCodeShippingNotFoundError(
           shippingInfo.shippingMethod?.id,
           shippingInfo.shippingMethod?.typeId,
-          shippingInfo.shippingMethod?.obj,
+          shippingInfo.shippingMethod?.custom,
           shippingMode
         );
       }
@@ -334,6 +337,30 @@ class TaxCodeService {
       logger.error('Unexpected error in shipping tax code determination', {
         error: error.message,
         shipping: shippingArray
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch shipping method from commercetools API by ID
+   * @param {string} shippingMethodId - Shipping method ID
+   * @returns {Promise<Object>} Shipping method object with custom fields
+   */
+  async getShippingMethodById(shippingMethodId) {
+    try {
+      const apiRoot = createApiRoot(); // Ya existe en create.client.js
+      const response = await apiRoot
+        .shippingMethods()
+        .withId({ ID: shippingMethodId })
+        .get()
+        .execute();
+      
+      return response.body;
+    } catch (error) {
+      logger.error('Error fetching shipping method from API', {
+        shippingMethodId,
+        error: error.message
       });
       throw error;
     }
