@@ -23,7 +23,7 @@ class TaxCodeService {
    * @returns {string} Stripe tax code (e.g., "txcd_99999999")
    * @throws {TaxCodeNotFoundError} If no tax code can be determined
    */
-  getTaxCodeForProduct(cartLineItem) {
+  getTaxCodeForProduct(cartLineItem, productCategories) {
     logger.debug('getTaxCodeForProduct', { cartLineItem });
     if (!cartLineItem) {
       throw new Error('Cart line item is required');
@@ -31,7 +31,7 @@ class TaxCodeService {
 
     try {
       // Step 1: Check category custom type
-      const customTypeCategoryTaxCode = this.getCustomTypeCategoryTaxCode(cartLineItem);
+      const customTypeCategoryTaxCode = this.getCustomTypeCategoryTaxCode(productCategories || []);
       if (customTypeCategoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, customTypeCategoryTaxCode, 'custom_type_category');
         return customTypeCategoryTaxCode;
@@ -45,14 +45,14 @@ class TaxCodeService {
       }
 
       // Step 3: Look up category in customer's mapping
-      const categoryTaxCode = this.getCategoryTaxCode(cartLineItem);
+      const categoryTaxCode = this.getCategoryTaxCode(cartLineItem, productCategories || []);
       if (categoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, categoryTaxCode, 'category_mapping');
         return categoryTaxCode;
       }
 
       // Step 4: Traverse parent categories
-      const parentCategoryTaxCode = this.getParentCategoryTaxCode(cartLineItem);
+      const parentCategoryTaxCode = this.getParentCategoryTaxCode(productCategories || []);
       if (parentCategoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, parentCategoryTaxCode, 'parent_category');
         return parentCategoryTaxCode;
@@ -86,11 +86,10 @@ class TaxCodeService {
 
   /**
    * Step 1: Check category custom type
-   * @param {Object} cartLineItem - Cart line item
+   * @param {Array} categories - Array of categories
    * @returns {string|null} Tax code from category custom type or null
    */
-  getCustomTypeCategoryTaxCode(cartLineItem) {
-    const categories = cartLineItem.categories || [];
+  getCustomTypeCategoryTaxCode(categories) {
     
     if (categories.length === 0) {
       return null;
@@ -124,7 +123,8 @@ class TaxCodeService {
     
     // Check if tax code is in the parent category
     if (category.parent) {
-      return this.findFirstTaxCodeInHierarchy(category.parent, processedCategories, depth + 1, maxDepth);
+      const parentCategory = category.parent.obj || category.parent;
+      return this.findFirstTaxCodeInHierarchy(parentCategory, processedCategories, depth + 1, maxDepth);
     }
     
     return null;
@@ -156,10 +156,10 @@ class TaxCodeService {
   /**
    * Step 3: Look up category in customer's mapping
    * @param {Object} cartLineItem - Cart line item
+   * @param {Array} categories - Array of categories
    * @returns {string|null} Tax code from category mapping or null
    */
-  getCategoryTaxCode(cartLineItem) {
-    const categories = cartLineItem.categories || [];
+  getCategoryTaxCode(cartLineItem, categories) {
 
     if (categories.length === 0) {
       logger.debug('No categories assigned to product', { productId: cartLineItem.productId });
@@ -190,11 +190,10 @@ class TaxCodeService {
 
   /**
    * Step 4: Traverse parent categories until match found
-   * @param {Object} cartLineItem - Cart line item
+   * @param {Array} categories - Array of categories
    * @returns {string|null} Tax code from parent category or null
    */
-  getParentCategoryTaxCode(cartLineItem) {
-    const categories = cartLineItem.categories || [];
+  getParentCategoryTaxCode(categories) {
 
     if (categories.length === 0) {
       return null;
@@ -230,7 +229,7 @@ class TaxCodeService {
       return null;
     }
 
-    const parent = category.parent;
+    const parent = category.parent.obj || category.parent;
 
     if (!parent.id && !parent.key) {
       logger.debug('Parent category has neither id nor key', { parent });

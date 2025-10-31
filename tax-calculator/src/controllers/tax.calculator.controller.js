@@ -6,6 +6,7 @@ import {
 } from '../constants/http.status.constants.js';
 
 import CustomError from '../errors/custom.error.js';
+import categoryService from '../services/category.service.js';
 import taxCodeService from '../services/tax-code.service.js';
 import TaxErrorHandlerService from '../services/tax-error-handler.service.js';
 import { createStripeClient } from '../clients/stripe.client.js';
@@ -34,7 +35,7 @@ export const taxHandler = async (request, response) => {
     try {
         // Map cart to tax request - may throw TaxCodeNotFoundError
         // This validates that all line items have valid tax codes
-        taxRequest = mapCartRequestToTaxRequest(cartRequestBody);
+        taxRequest = await mapCartRequestToTaxRequest(cartRequestBody);
 
         logger.info(`Tax request to Stripe: ${JSON.stringify(taxRequest,null,2)}`);
         const stripeClient = createStripeClient();
@@ -52,7 +53,7 @@ export const taxHandler = async (request, response) => {
     );
 };
 
-function mapCartRequestToTaxRequest(cartRequest) {
+async function mapCartRequestToTaxRequest(cartRequest) {
     let taxRequest = {customer_details: {address: {}}, line_items: []};
 
 
@@ -85,6 +86,19 @@ function mapCartRequestToTaxRequest(cartRequest) {
     if (cartRequest.lineItems.length > 0) {
         taxBehaviorService.logBehaviorDecision(cartRequest.lineItems[0], cartTaxBehavior, cartRequest);
     }
+
+    const productIds = cartRequest.lineItems
+        .map(item => item.productId)
+        .filter(Boolean);
+
+    const categoriesMap = await categoryService.getCategoriesForProducts(
+        productIds,
+        {
+            staged: false,
+            locale: cartRequest.locale || undefined,
+            useCache: true
+        }
+    );
     
     for (const cartLineItem of cartRequest.lineItems) {
         const lineItemBehavior = taxBehaviors[cartLineItem.id];
@@ -92,8 +106,10 @@ function mapCartRequestToTaxRequest(cartRequest) {
         lineItemData.amount = cartLineItem.totalPrice?.centAmount;
         lineItemData.reference = cartLineItem.id;
 
+        const productCategories = categoriesMap.get(cartLineItem.productId) || [];
+
         // Get tax code dynamically using tax code service
-        lineItemData.tax_code = taxCodeService.getTaxCodeForProduct(cartLineItem);
+        lineItemData.tax_code = taxCodeService.getTaxCodeForProduct(cartLineItem, productCategories);
 
         // Only add tax_behavior if one was determined, otherwise let Stripe use its default behavior
         if (lineItemBehavior) {
