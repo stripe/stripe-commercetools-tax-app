@@ -170,10 +170,10 @@ export const CART_TAX_CUSTOM_TYPE = {
     {
       "name": CART_TAX_FIELD_NAMES.EXPIRES_AT,
       "label": {
-        "en": "Tax Calculation Expires At"
+        "en": "Tax Calculation Expires At (ISO 8601)"
       },
       "type": {
-        "name": "DateTime"
+        "name": "String"
       },
       "required": false,
       "inputHint": "SingleLine"
@@ -181,10 +181,10 @@ export const CART_TAX_CUSTOM_TYPE = {
     {
       "name": CART_TAX_FIELD_NAMES.CALCULATION_TIMESTAMP,
       "label": {
-        "en": "Calculation Timestamp"
+        "en": "Calculation Timestamp (ISO 8601)"
       },
       "type": {
-        "name": "DateTime"
+        "name": "String"
       },
       "required": false,
       "inputHint": "SingleLine"

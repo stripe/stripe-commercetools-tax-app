@@ -11,9 +11,10 @@ class UpdateActionService {
   /**
    * Create cart update actions from Stripe tax calculation
    * @param {Object} calculation - Stripe tax calculation response object
+   * @param {Object} cartRequestBody - Cart request body object
    * @returns {Array} Array of Commercetools update actions
    */
-  createCartUpdateActionsFromTaxCalculation(calculation) {
+  createCartUpdateActionsFromTaxCalculation(calculation, cartRequestBody) {
     const updateActions = [];
     
     try {
@@ -29,6 +30,43 @@ class UpdateActionService {
       const shippingAction = this.createShippingTaxUpdateAction(calculation);
       if (shippingAction) {
         updateActions.push(shippingAction);
+      } else {
+
+        if (cartRequestBody.shippingMode === 'Single') {
+          updateActions.push({
+            action: "setShippingMethodTaxAmount",
+            externalTaxAmount: {
+              totalGross: {
+                currencyCode: calculation.currency?.toUpperCase(),
+                centAmount: 0
+              },
+              taxRate: {
+                name: 'Shipping Tax',
+                amount: 0,
+                country: calculation.tax_breakdown[0].tax_rate_details.country
+              }
+            }
+          });
+        }else {
+          const shippingActions = cartRequestBody.shipping.map(shipping => {
+            return {
+              action: "setShippingMethodTaxAmount",
+              shippingKey: shipping.shippingKey,
+              externalTaxAmount: {
+                totalGross: {
+                  currencyCode: calculation.currency?.toUpperCase(),
+                  centAmount: 0
+                },
+                taxRate: {
+                  name: 'Shipping Tax',
+                  amount: 0,
+                  country: calculation.tax_breakdown[0].tax_rate_details.country
+                }
+              }
+            }
+          });
+          updateActions.push(...shippingActions);
+        }
       }
         
       logger.info(`Created ${updateActions.length} cart update actions from tax calculation`);
@@ -58,7 +96,7 @@ class UpdateActionService {
         [CART_TAX_FIELD_NAMES.TAX_AMOUNT_EXCLUSIVE]: calculation.tax_amount_exclusive,
         [CART_TAX_FIELD_NAMES.TAX_AMOUNT_INCLUSIVE]: calculation.tax_amount_inclusive,
         [CART_TAX_FIELD_NAMES.CURRENCY]: calculation.currency,
-        [CART_TAX_FIELD_NAMES.EXPIRES_AT]: calculation.expires_at,
+        [CART_TAX_FIELD_NAMES.EXPIRES_AT]: new Date(calculation.expires_at * 1000).toISOString(),
         [CART_TAX_FIELD_NAMES.CALCULATION_TIMESTAMP]: new Date().toISOString()
       }
     };

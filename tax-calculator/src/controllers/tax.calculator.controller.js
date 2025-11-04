@@ -43,7 +43,7 @@ export const taxHandler = async (request, response) => {
         // Call Stripe Tax API - may throw errors for unsupported countries or missing tax rates
         calculation = await stripeClient.tax.calculations.create(taxRequest);
         logger.info(`Tax calculation from Stripe: ${JSON.stringify(calculation,null,2)}`);
-        actionItems = updateActionService.createCartUpdateActionsFromTaxCalculation(calculation);
+        actionItems = updateActionService.createCartUpdateActionsFromTaxCalculation(calculation, cartRequestBody);
     } catch (err) {
         return TaxErrorHandlerService.handleTaxCalculationError(err, request, response, cartRequestBody);
     }
