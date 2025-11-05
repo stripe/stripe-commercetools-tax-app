@@ -7,6 +7,7 @@ import {
   PRODUCT_TAX_CUSTOM_TYPE,
   CATEGORY_TAX_CUSTOM_TYPE,
   SHIPPING_TAX_CUSTOM_TYPE,
+  CART_TAX_CUSTOM_TYPE,
 } from './customTypes.js';
 
 export async function createCTPExtension(
@@ -230,7 +231,8 @@ export async function createCustomTypes(apiRoot) {
   const customTypes = [
     PRODUCT_TAX_CUSTOM_TYPE,
     CATEGORY_TAX_CUSTOM_TYPE,
-    SHIPPING_TAX_CUSTOM_TYPE
+    SHIPPING_TAX_CUSTOM_TYPE,
+    CART_TAX_CUSTOM_TYPE
   ];
 
   for (const customType of customTypes) {
@@ -339,7 +341,8 @@ export async function deleteCustomTypes(apiRoot, cleanupCustomTypes = false) {
   const customTypes = [
     PRODUCT_TAX_CUSTOM_TYPE,
     CATEGORY_TAX_CUSTOM_TYPE,
-    SHIPPING_TAX_CUSTOM_TYPE
+    SHIPPING_TAX_CUSTOM_TYPE,
+    CART_TAX_CUSTOM_TYPE
   ];
 
   for (const customType of customTypes) {
@@ -375,11 +378,10 @@ async function deleteOrUpdateCustomType(apiRoot, customType) {
       )
       .map((fieldDefinition) => ({
         action: 'removeFieldDefinition',
-        fieldDefinition: fieldDefinition.name,
+        fieldName: fieldDefinition.name,
       }));
 
     if (updates.length !== 0) {
-      logger.info('updates.length is not 0');
       if (type.fieldDefinitions?.length === 1) {
         await apiRoot
           .types()
@@ -420,48 +422,47 @@ export async function validateCustomTypes(apiRoot) {
     errors: []
   };
 
-  const customTypeKeys = [
-    PRODUCT_TAX_CUSTOM_TYPE.key,
-    CATEGORY_TAX_CUSTOM_TYPE.key,
-    SHIPPING_TAX_CUSTOM_TYPE.key
+  const customTypes = [
+    PRODUCT_TAX_CUSTOM_TYPE,
+    CATEGORY_TAX_CUSTOM_TYPE,
+    SHIPPING_TAX_CUSTOM_TYPE,
+    CART_TAX_CUSTOM_TYPE
   ];
 
   try {
-    for (const typeKey of customTypeKeys) {
+    for (const customTypeDefinition of customTypes) {
       const typeValidation = {
-        key: typeKey,
+        key: customTypeDefinition.key,
         exists: false,
         hasRequiredField: false,
         resourceTypes: []
       };
 
       try {
-        const customType = await getCustomType(apiRoot, typeKey);
+        // Get custom types by resourceTypeId and find the one with matching key
+        const existingTypes = await getCustomTypesByResourceTypeId(apiRoot, customTypeDefinition.resourceTypeIds[0]);
+        const customType = existingTypes.find(type => type.key === customTypeDefinition.key);
         
         if (customType) {
           typeValidation.exists = true;
           typeValidation.resourceTypes = customType.resourceTypeIds || [];
-
-          // Check if required field exists
-          const hasRequiredField = customType.fieldDefinitions?.some(
+          typeValidation.hasRequiredField = customType.fieldDefinitions?.some(
             field => field.name === TAX_CODE_CUSTOM_TYPE_NAME
           );
           
-          typeValidation.hasRequiredField = hasRequiredField;
-          
-          if (!hasRequiredField) {
+          if (!typeValidation.hasRequiredField) {
             validationResult.isValid = false;
             validationResult.errors.push(
-              `Custom type '${typeKey}' is missing required field ${TAX_CODE_CUSTOM_TYPE_NAME}`
+              `Custom type '${customTypeDefinition.key}' is missing required field ${TAX_CODE_CUSTOM_TYPE_NAME}`
             );
           }
         } else {
           validationResult.isValid = false;
-          validationResult.errors.push(`Custom type '${typeKey}' does not exist`);
+          validationResult.errors.push(`Custom type '${customTypeDefinition.key}' does not exist`);
         }
       } catch (error) {
         validationResult.isValid = false;
-        validationResult.errors.push(`Failed to validate custom type '${typeKey}': ${error.message}`);
+        validationResult.errors.push(`Failed to validate custom type '${customTypeDefinition.key}': ${error.message}`);
       }
 
       validationResult.customTypes.push(typeValidation);

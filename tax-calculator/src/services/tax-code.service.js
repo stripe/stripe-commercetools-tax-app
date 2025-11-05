@@ -3,6 +3,7 @@ import taxCodeMappingConfig from '../config/taxCodeMapping.config.js';
 import TaxCodeNotFoundError from '../errors/taxCodeNotFound.error.js';
 import TaxCodeShippingNotFoundError from '../errors/taxCodeShippingNotFound.error.js';
 import { TAX_CODE_CUSTOM_TYPE_NAME } from '../connectors/customTypes.js';
+import { createApiRoot } from '../clients/create.client.js';
 
 /**
  * Tax Code Service
@@ -23,7 +24,7 @@ class TaxCodeService {
    * @returns {string} Stripe tax code (e.g., "txcd_99999999")
    * @throws {TaxCodeNotFoundError} If no tax code can be determined
    */
-  getTaxCodeForProduct(cartLineItem) {
+  getTaxCodeForProduct(cartLineItem, productCategories) {
     logger.debug('getTaxCodeForProduct', { cartLineItem });
     if (!cartLineItem) {
       throw new Error('Cart line item is required');
@@ -31,7 +32,7 @@ class TaxCodeService {
 
     try {
       // Step 1: Check category custom type
-      const customTypeCategoryTaxCode = this.getCustomTypeCategoryTaxCode(cartLineItem);
+      const customTypeCategoryTaxCode = this.getCustomTypeCategoryTaxCode(productCategories || []);
       if (customTypeCategoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, customTypeCategoryTaxCode, 'custom_type_category');
         return customTypeCategoryTaxCode;
@@ -45,14 +46,14 @@ class TaxCodeService {
       }
 
       // Step 3: Look up category in customer's mapping
-      const categoryTaxCode = this.getCategoryTaxCode(cartLineItem);
+      const categoryTaxCode = this.getCategoryTaxCode(cartLineItem, productCategories || []);
       if (categoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, categoryTaxCode, 'category_mapping');
         return categoryTaxCode;
       }
 
       // Step 4: Traverse parent categories
-      const parentCategoryTaxCode = this.getParentCategoryTaxCode(cartLineItem);
+      const parentCategoryTaxCode = this.getParentCategoryTaxCode(productCategories || []);
       if (parentCategoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, parentCategoryTaxCode, 'parent_category');
         return parentCategoryTaxCode;
@@ -86,11 +87,10 @@ class TaxCodeService {
 
   /**
    * Step 1: Check category custom type
-   * @param {Object} cartLineItem - Cart line item
+   * @param {Array} categories - Array of categories
    * @returns {string|null} Tax code from category custom type or null
    */
-  getCustomTypeCategoryTaxCode(cartLineItem) {
-    const categories = cartLineItem.categories || [];
+  getCustomTypeCategoryTaxCode(categories) {
     
     if (categories.length === 0) {
       return null;
@@ -124,7 +124,8 @@ class TaxCodeService {
     
     // Check if tax code is in the parent category
     if (category.parent) {
-      return this.findFirstTaxCodeInHierarchy(category.parent, processedCategories, depth + 1, maxDepth);
+      const parentCategory = category.parent.obj || category.parent;
+      return this.findFirstTaxCodeInHierarchy(parentCategory, processedCategories, depth + 1, maxDepth);
     }
     
     return null;
@@ -156,10 +157,10 @@ class TaxCodeService {
   /**
    * Step 3: Look up category in customer's mapping
    * @param {Object} cartLineItem - Cart line item
+   * @param {Array} categories - Array of categories
    * @returns {string|null} Tax code from category mapping or null
    */
-  getCategoryTaxCode(cartLineItem) {
-    const categories = cartLineItem.categories || [];
+  getCategoryTaxCode(cartLineItem, categories) {
 
     if (categories.length === 0) {
       logger.debug('No categories assigned to product', { productId: cartLineItem.productId });
@@ -190,11 +191,10 @@ class TaxCodeService {
 
   /**
    * Step 4: Traverse parent categories until match found
-   * @param {Object} cartLineItem - Cart line item
+   * @param {Array} categories - Array of categories
    * @returns {string|null} Tax code from parent category or null
    */
-  getParentCategoryTaxCode(cartLineItem) {
-    const categories = cartLineItem.categories || [];
+  getParentCategoryTaxCode(categories) {
 
     if (categories.length === 0) {
       return null;
@@ -230,7 +230,7 @@ class TaxCodeService {
       return null;
     }
 
-    const parent = category.parent;
+    const parent = category.parent.obj || category.parent;
 
     if (!parent.id && !parent.key) {
       logger.debug('Parent category has neither id nor key', { parent });
@@ -260,10 +260,12 @@ class TaxCodeService {
    * @returns {string} Shipping tax code
    * @throws {TaxCodeShippingNotFoundError} If no tax code can be determined
    */
-  getShippingTaxCodeFromShippingInfo(shippingInfo, shippingMode) {
+  async getShippingTaxCodeFromShippingInfo(shippingInfo, shippingMode) {
     try {
       // Step 1: Check custom type
-      const customTypeShippingTaxCode = shippingInfo?.shippingMethod?.obj?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
+      const shippingMethod = await this.getShippingMethodById(shippingInfo.shippingMethod.id);
+
+      const customTypeShippingTaxCode = shippingMethod?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
       if (customTypeShippingTaxCode) {
         return customTypeShippingTaxCode;
       }
@@ -272,7 +274,7 @@ class TaxCodeService {
         throw new TaxCodeShippingNotFoundError(
           shippingInfo.shippingMethod?.id,
           shippingInfo.shippingMethod?.typeId,
-          shippingInfo.shippingMethod?.obj,
+          shippingInfo.shippingMethod?.custom,
           shippingMode
         );
       }
@@ -335,6 +337,30 @@ class TaxCodeService {
       logger.error('Unexpected error in shipping tax code determination', {
         error: error.message,
         shipping: shippingArray
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch shipping method from commercetools API by ID
+   * @param {string} shippingMethodId - Shipping method ID
+   * @returns {Promise<Object>} Shipping method object with custom fields
+   */
+  async getShippingMethodById(shippingMethodId) {
+    try {
+      const apiRoot = createApiRoot(); // Ya existe en create.client.js
+      const response = await apiRoot
+        .shippingMethods()
+        .withId({ ID: shippingMethodId })
+        .get()
+        .execute();
+      
+      return response.body;
+    } catch (error) {
+      logger.error('Error fetching shipping method from API', {
+        shippingMethodId,
+        error: error.message
       });
       throw error;
     }

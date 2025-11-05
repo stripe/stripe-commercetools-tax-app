@@ -6,12 +6,12 @@ import {
 } from '../constants/http.status.constants.js';
 
 import CustomError from '../errors/custom.error.js';
+import categoryService from '../services/category.service.js';
 import taxCodeService from '../services/tax-code.service.js';
 import TaxErrorHandlerService from '../services/tax-error-handler.service.js';
 import { createStripeClient } from '../clients/stripe.client.js';
 import { taxBehaviorService } from '../services/tax-behavior.service.js';
-
-const CTP_TYPE_TAX_TXN_KEY = 'stripe-tax';
+import updateActionService from '../services/update-action.service.js';
 
 export const taxHandler = async (request, response) => {
     let calculation;
@@ -35,7 +35,7 @@ export const taxHandler = async (request, response) => {
     try {
         // Map cart to tax request - may throw TaxCodeNotFoundError
         // This validates that all line items have valid tax codes
-        taxRequest = mapCartRequestToTaxRequest(cartRequestBody);
+        taxRequest = await mapCartRequestToTaxRequest(cartRequestBody);
 
         logger.info(`Tax request to Stripe: ${JSON.stringify(taxRequest,null,2)}`);
         const stripeClient = createStripeClient();
@@ -43,7 +43,7 @@ export const taxHandler = async (request, response) => {
         // Call Stripe Tax API - may throw errors for unsupported countries or missing tax rates
         calculation = await stripeClient.tax.calculations.create(taxRequest);
         logger.info(`Tax calculation from Stripe: ${JSON.stringify(calculation,null,2)}`);
-        actionItems = await addUpdateCartLineItems(cartRequestBody.id, calculation);
+        actionItems = updateActionService.createCartUpdateActionsFromTaxCalculation(calculation, cartRequestBody);
     } catch (err) {
         return TaxErrorHandlerService.handleTaxCalculationError(err, request, response, cartRequestBody);
     }
@@ -53,44 +53,7 @@ export const taxHandler = async (request, response) => {
     );
 };
 
-async function addUpdateCartLineItems(cartId, calculation) {
-    let actionItems = [];
-
-    actionItems.push({
-        action: "setCustomType",
-        type: {
-            key: `${CTP_TYPE_TAX_TXN_KEY}`,
-            typeId: "type"
-        },
-        fields: {
-            taxCalculationReference: calculation.id
-        }
-    });
-
-    const taxRateDetails = calculation.tax_breakdown[0]?.tax_rate_details;
-    const calculatedLineItems = calculation.line_items?.data;
-    for (const lineItemTaxData of calculatedLineItems) {
-        actionItems.push({
-            action: "setLineItemTaxAmount",
-            lineItemId: lineItemTaxData.reference,
-            externalTaxAmount: {
-                totalGross: {
-                    currencyCode: calculation.currency?.toUpperCase(),
-                    centAmount: lineItemTaxData.amount_tax
-                },
-                taxRate: {
-                    name: taxRateDetails?.tax_type,
-                    amount: parseFloat(taxRateDetails?.percentage_decimal/100),
-                    country: taxRateDetails?.country
-                }
-            }
-        });
-    }
-
-    return actionItems;
-}
-
-function mapCartRequestToTaxRequest(cartRequest) {
+async function mapCartRequestToTaxRequest(cartRequest) {
     let taxRequest = {customer_details: {address: {}}, line_items: []};
 
 
@@ -123,6 +86,19 @@ function mapCartRequestToTaxRequest(cartRequest) {
     if (cartRequest.lineItems.length > 0) {
         taxBehaviorService.logBehaviorDecision(cartRequest.lineItems[0], cartTaxBehavior, cartRequest);
     }
+
+    const productIds = cartRequest.lineItems
+        .map(item => item.productId)
+        .filter(Boolean);
+
+    const categoriesMap = await categoryService.getCategoriesForProducts(
+        productIds,
+        {
+            staged: false,
+            locale: cartRequest.locale || undefined,
+            useCache: true
+        }
+    );
     
     for (const cartLineItem of cartRequest.lineItems) {
         const lineItemBehavior = taxBehaviors[cartLineItem.id];
@@ -130,8 +106,10 @@ function mapCartRequestToTaxRequest(cartRequest) {
         lineItemData.amount = cartLineItem.totalPrice?.centAmount;
         lineItemData.reference = cartLineItem.id;
 
+        const productCategories = categoriesMap.get(cartLineItem.productId) || [];
+
         // Get tax code dynamically using tax code service
-        lineItemData.tax_code = taxCodeService.getTaxCodeForProduct(cartLineItem);
+        lineItemData.tax_code = taxCodeService.getTaxCodeForProduct(cartLineItem, productCategories);
 
         // Only add tax_behavior if one was determined, otherwise let Stripe use its default behavior
         if (lineItemBehavior) {
@@ -141,14 +119,14 @@ function mapCartRequestToTaxRequest(cartRequest) {
         taxRequest.line_items.push(lineItemData);
     }
 
-    taxRequest.shipping_cost = mapShippingInfoToTaxRequest(cartRequest);
+    taxRequest.shipping_cost = await mapShippingInfoToTaxRequest(cartRequest);
 
     taxRequest.expand = ['line_items']
 
     return taxRequest;
 }
 
-function mapShippingInfoToTaxRequest(cartRequest) {
+async function mapShippingInfoToTaxRequest(cartRequest) {
     let shipping_cost = {};
     
     shipping_cost.tax_behavior = 'exclusive';
@@ -156,14 +134,14 @@ function mapShippingInfoToTaxRequest(cartRequest) {
     if (cartRequest.shippingMode === 'Single') {
         if (cartRequest.shippingInfo) {
             shipping_cost.amount = cartRequest.shippingInfo?.price?.centAmount;
-            const taxCode = taxCodeService.getShippingTaxCodeFromShippingInfo(cartRequest.shippingInfo, cartRequest.shippingMode);
+            const taxCode = await taxCodeService.getShippingTaxCodeFromShippingInfo(cartRequest.shippingInfo, cartRequest.shippingMode);
             if (taxCode) {
                 shipping_cost.tax_code = taxCode;
             }
         }
     } else if (cartRequest.shippingMode === 'Multiple') {
         if (cartRequest.shipping && cartRequest.shipping.length > 0) {
-            const {price, taxCode} = taxCodeService.getShippingPriceAndTaxCodeFromShipping(cartRequest.shipping, cartRequest.shippingMode);
+            const {price, taxCode} = await taxCodeService.getShippingPriceAndTaxCodeFromShipping(cartRequest.shipping, cartRequest.shippingMode);
             if (price) {
                 shipping_cost.amount = price;
                 shipping_cost.tax_code = taxCode;
