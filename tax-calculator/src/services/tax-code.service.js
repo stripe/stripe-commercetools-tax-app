@@ -1,7 +1,6 @@
 import { logger } from '../utils/logger.utils.js';
 import taxCodeMappingConfig from '../config/taxCodeMapping.config.js';
 import TaxCodeNotFoundError from '../errors/taxCodeNotFound.error.js';
-import TaxCodeShippingNotFoundError from '../errors/taxCodeShippingNotFound.error.js';
 import { TAX_CODE_CUSTOM_TYPE_NAME } from '../connectors/customTypes.js';
 import { createApiRoot } from '../clients/create.client.js';
 
@@ -21,6 +20,7 @@ class TaxCodeService {
   /**
    * Get tax code for a cart line item
    * @param {Object} cartLineItem - commercetools cart line item
+   * @param {Object} productCategories - Map of categories for product
    * @returns {string} Stripe tax code (e.g., "txcd_99999999")
    * @throws {TaxCodeNotFoundError} If no tax code can be determined
    */
@@ -31,35 +31,35 @@ class TaxCodeService {
     }
 
     try {
-      // Step 1: Check category custom type
+      // STRATEGY 1: Check category custom type
       const customTypeCategoryTaxCode = this.getCustomTypeCategoryTaxCode(productCategories || []);
       if (customTypeCategoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, customTypeCategoryTaxCode, 'custom_type_category');
         return customTypeCategoryTaxCode;
       }
 
-      // Step 2: Check product custom field
+      // STRATEGY 2: Check product custom field
       /*const customFieldTaxCode = this.getCustomFieldTaxCode(cartLineItem);
       if (customFieldTaxCode) {
         this.logTaxCodeDecision(cartLineItem, customFieldTaxCode, 'custom_field');
         return customFieldTaxCode;
       }
 
-      // Step 3: Look up category in customer's mapping
+      // STRATEGY 3: Look up category in customer's mapping
       const categoryTaxCode = this.getCategoryTaxCode(cartLineItem, productCategories || []);
       if (categoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, categoryTaxCode, 'category_mapping');
         return categoryTaxCode;
       }
 
-      // Step 4: Traverse parent categories
+      // STRATEGY 4: Traverse parent categories
       const parentCategoryTaxCode = this.getParentCategoryTaxCode(productCategories || []);
       if (parentCategoryTaxCode) {
         this.logTaxCodeDecision(cartLineItem, parentCategoryTaxCode, 'parent_category');
         return parentCategoryTaxCode;
       }*/
 
-      // Step 5: No tax code found - throw error
+      // STRATEGY 5: No tax code found - throw error
       throw new TaxCodeNotFoundError(
         cartLineItem.productId,
         cartLineItem.name || 'Unknown Product',
@@ -256,90 +256,18 @@ class TaxCodeService {
   /**
    * Get shipping tax code from shipping info
    * @param {Object} shippingInfo - Shipping info
-   * @param {string} shippingMode - Shipping mode
-   * @returns {string} Shipping tax code
-   * @throws {TaxCodeShippingNotFoundError} If no tax code can be determined
+   * @returns {string|null} Shipping tax code or null if no tax code can be determined
    */
-  async getShippingTaxCodeFromShippingInfo(shippingInfo, shippingMode) {
-    try {
-      // Step 1: Check custom type
-      const shippingMethod = await this.getShippingMethodById(shippingInfo.shippingMethod.id);
+  async getShippingTaxCodeFromShippingInfo(shippingInfo) {
 
-      const customTypeShippingTaxCode = shippingMethod?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
-      if (customTypeShippingTaxCode) {
-        return customTypeShippingTaxCode;
-      }
+    const shippingMethod = await this.getShippingMethodById(shippingInfo.shippingMethod.id);
 
-      if (shippingMode === 'Single') {
-        throw new TaxCodeShippingNotFoundError(
-          shippingInfo.shippingMethod?.id,
-          shippingInfo.shippingMethod?.typeId,
-          shippingInfo.shippingMethod?.custom,
-          shippingMode
-        );
-      }
+    const customTypeShippingTaxCode = shippingMethod?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
+    if (customTypeShippingTaxCode) {
+      return customTypeShippingTaxCode;
+    } 
 
-    } catch (error) {
-      if (error instanceof TaxCodeShippingNotFoundError) {
-        logger.warn('Tax code not found for shipping method', {  
-          shippingMethodId: error.shippingMethodId,
-          shippingMethodTypeId: error.shippingMethodTypeId,
-          shippingMethodObj: error.shippingMethodObj,
-          shippingMode: error.shippingMode
-        });
-        throw error;
-      }
-
-      // Unexpected error
-      logger.error('Unexpected error in shipping tax code determination', {
-        error: error.message,
-        shippingMethodId: shippingInfo.shippingMethod?.id,
-      });
-
-      throw error;
-    }
-  }
-
-  /**
-   * Get shipping tax code from shipping
-   * @param {Array} shippingArray - Shipping array
-   * @param {string} shippingMode - Shipping mode
-   * @returns {string} Shipping tax code
-   * @throws {TaxCodeShippingNotFoundError} If no tax code can be determined
-   */
-  getShippingPriceAndTaxCodeFromShipping(shippingArray, shippingMode) {
-    try {
-      
-      for (const shipping of shippingArray) {
-        const taxCode = this.getShippingTaxCodeFromShippingInfo(shipping, shippingMode);
-        if (taxCode) {
-          return {price: shipping.price?.centAmount, taxCode: taxCode};
-        }
-      }
-
-      throw new TaxCodeShippingNotFoundError(
-        null, // Multiple mode does not have a specific shipping method id
-        null, // Multiple mode does not have a specific shipping method type id
-        shippingArray,
-        shippingMode
-      );
-
-    } catch (error) {
-      if (error instanceof TaxCodeShippingNotFoundError) {
-        logger.warn('Tax code not found for shipping', {
-          shippingObj: error.shippingMethodObj,
-          shippingMode: error.shippingMode
-        });
-        throw error;
-      }
-
-      // Unexpected error
-      logger.error('Unexpected error in shipping tax code determination', {
-        error: error.message,
-        shipping: shippingArray
-      });
-      throw error;
-    }
+    return null;
   }
 
   /**
@@ -349,7 +277,7 @@ class TaxCodeService {
    */
   async getShippingMethodById(shippingMethodId) {
     try {
-      const apiRoot = createApiRoot(); // Ya existe en create.client.js
+      const apiRoot = createApiRoot();
       const response = await apiRoot
         .shippingMethods()
         .withId({ ID: shippingMethodId })

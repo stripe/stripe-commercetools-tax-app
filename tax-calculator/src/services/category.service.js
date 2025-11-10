@@ -125,7 +125,6 @@ class CategoryService {
       queryArgs.locale = locale;
     }
 
-    // Execute query
     const response = await createApiRoot()
       .productProjections()
       .get({ queryArgs })
@@ -139,12 +138,6 @@ class CategoryService {
     productProjections.forEach(projection => {
       const categories = this.extractCategories(projection);
       categoriesMap.set(projection.id, categories);
-      
-      logger.debug('Categories extracted for product', {
-        productId: projection.id,
-        categoriesCount: categories.length,
-        hasCustomFields: categories.some(cat => cat.custom?.fields)
-      });
     });
 
     logger.info('Categories fetched from API', {
@@ -218,18 +211,17 @@ class CategoryService {
     }
 
     return productProjection.categories
+      .filter(Boolean)
       .map(catRef => {
-        // If the category is expanded (has obj), return the full object
         if (catRef.obj) {
           return catRef.obj;
         }
-        // If not expanded, return only the basic reference
+
         return {
           id: catRef.id,
           typeId: catRef.typeId
         };
-      })
-      .filter(Boolean); // Filter null/undefined
+      });
   }
 
   /**
