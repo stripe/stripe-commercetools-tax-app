@@ -1,10 +1,10 @@
 import { expect, describe, it, jest, beforeEach, afterEach } from '@jest/globals';
-import taxCodeService from '../../src/services/tax-code.service.js';
-import TaxCodeNotFoundError from '../../src/errors/taxCodeNotFound.error.js';
-import { TAX_CODE_CUSTOM_TYPE_NAME } from '../../src/connectors/customTypes.js';
+import taxCodeService from '../../../src/services/tax-code.service.js';
+import TaxCodeNotFoundError from '../../../src/errors/taxCodeNotFound.error.js';
+import { TAX_CODE_CUSTOM_TYPE_NAME } from '../../../src/connectors/customTypes.js';
 
 // Mock dependencies
-jest.mock('../../src/utils/logger.utils.js', () => ({
+jest.mock('../../../src/utils/logger.utils.js', () => ({
   logger: {
     info: jest.fn(),
     warn: jest.fn(),
@@ -13,19 +13,19 @@ jest.mock('../../src/utils/logger.utils.js', () => ({
   }
 }));
 
-jest.mock('../../src/clients/create.client.js', () => ({
+jest.mock('../../../src/clients/create.client.js', () => ({
   createApiRoot: jest.fn()
 }));
 
-jest.mock('../../src/config/taxCodeMapping.config.js', () => ({
+jest.mock('../../../src/config/taxCodeMapping.config.js', () => ({
   default: {
     getTaxCodeForCategory: jest.fn().mockReturnValue(null)
   }
 }));
 
-import { logger } from '../../src/utils/logger.utils.js';
-import { createApiRoot } from '../../src/clients/create.client.js';
-import taxCodeMappingConfig from '../../src/config/taxCodeMapping.config.js';
+import { logger } from '../../../src/utils/logger.utils.js';
+import { createApiRoot } from '../../../src/clients/create.client.js';
+import taxCodeMappingConfig from '../../../src/config/taxCodeMapping.config.js';
 
 describe('TaxCodeService', () => {
   let mockApiRoot;

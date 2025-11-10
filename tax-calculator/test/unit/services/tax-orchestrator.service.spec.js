@@ -1,9 +1,9 @@
 import { expect, describe, it, jest, beforeEach, afterEach } from '@jest/globals';
-import { TaxOrchestratorService } from '../../src/services/tax-orchestrator.service.js';
-import ShipFromNotFoundError from '../../src/errors/shipFromNotFoundError.js';
+import { TaxOrchestratorService } from '../../../src/services/tax-orchestrator.service.js';
+import ShipFromNotFoundError from '../../../src/errors/shipFromNotFoundError.js';
 
 // Mock dependencies
-jest.mock('../../src/utils/logger.utils.js', () => ({
+jest.mock('../../../src/utils/logger.utils.js', () => ({
   logger: {
     info: jest.fn(),
     warn: jest.fn(),
@@ -12,32 +12,32 @@ jest.mock('../../src/utils/logger.utils.js', () => ({
   }
 }));
 
-jest.mock('../../src/clients/stripe.client.js', () => ({
+jest.mock('../../../src/clients/stripe.client.js', () => ({
   createStripeClient: jest.fn()
 }));
 
-jest.mock('../../src/services/ship-from.service.js', () => ({
+jest.mock('../../../src/services/ship-from.service.js', () => ({
   __esModule: true,
   default: {
     resolveAllShipFromAddresses: jest.fn()
   }
 }));
 
-jest.mock('../../src/services/tax-behavior.service.js', () => ({
+jest.mock('../../../src/services/tax-behavior.service.js', () => ({
   taxBehaviorService: {
     determineTaxBehaviorForCart: jest.fn(),
     logBehaviorDecision: jest.fn()
   }
 }));
 
-jest.mock('../../src/services/category.service.js', () => ({
+jest.mock('../../../src/services/category.service.js', () => ({
   __esModule: true,
   default: {
     getCategoriesForProducts: jest.fn()
   }
 }));
 
-jest.mock('../../src/services/tax-code.service.js', () => ({
+jest.mock('../../../src/services/tax-code.service.js', () => ({
   __esModule: true,
   default: {
     getTaxCodeForProduct: jest.fn(),
@@ -45,20 +45,20 @@ jest.mock('../../src/services/tax-code.service.js', () => ({
   }
 }));
 
-jest.mock('../../src/services/update-action.service.js', () => ({
+jest.mock('../../../src/services/update-action.service.js', () => ({
   __esModule: true,
   default: {
     createCartUpdateActionsFromMultipleCalculations: jest.fn()
   }
 }));
 
-import { logger } from '../../src/utils/logger.utils.js';
-import { createStripeClient } from '../../src/clients/stripe.client.js';
-import shipFromService from '../../src/services/ship-from.service.js';
-import { taxBehaviorService } from '../../src/services/tax-behavior.service.js';
-import categoryService from '../../src/services/category.service.js';
-import taxCodeService from '../../src/services/tax-code.service.js';
-import updateActionService from '../../src/services/update-action.service.js';
+import { logger } from '../../../src/utils/logger.utils.js';
+import { createStripeClient } from '../../../src/clients/stripe.client.js';
+import shipFromService from '../../../src/services/ship-from.service.js';
+import { taxBehaviorService } from '../../../src/services/tax-behavior.service.js';
+import categoryService from '../../../src/services/category.service.js';
+import taxCodeService from '../../../src/services/tax-code.service.js';
+import updateActionService from '../../../src/services/update-action.service.js';
 
 describe('TaxOrchestratorService', () => {
   let taxOrchestratorService;

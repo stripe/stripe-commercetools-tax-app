@@ -1,10 +1,10 @@
 // tax-calculator/test/unit/update-action.service.spec.js
 import { expect, describe, it, jest } from '@jest/globals';
-import updateActionService from '../../src/services/update-action.service.js';
-import { CART_TAX_CUSTOM_TYPE, CART_TAX_FIELD_NAMES } from '../../src/connectors/customTypes.js';
+import updateActionService from '../../../src/services/update-action.service.js';
+import { CART_TAX_CUSTOM_TYPE, CART_TAX_FIELD_NAMES } from '../../../src/connectors/customTypes.js';
 
 // Mock dependencies
-jest.mock('../../src/utils/logger.utils.js', () => ({
+jest.mock('../../../src/utils/logger.utils.js', () => ({
   logger: {
     info: jest.fn(),
     warn: jest.fn(),
@@ -13,7 +13,7 @@ jest.mock('../../src/utils/logger.utils.js', () => ({
   }
 }));
 
-import { logger } from '../../src/utils/logger.utils.js';
+import { logger } from '../../../src/utils/logger.utils.js';
 
 describe('UpdateActionService', () => {
   beforeEach(() => {

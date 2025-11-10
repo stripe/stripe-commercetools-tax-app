@@ -1,8 +1,8 @@
 import { expect, describe, it, jest, beforeEach, afterEach } from '@jest/globals';
-import { ShipFromService } from '../../src/services/ship-from.service.js';
+import { ShipFromService } from '../../../src/services/ship-from.service.js';
 
 // Mock dependencies
-jest.mock('../../src/utils/logger.utils.js', () => ({
+jest.mock('../../../src/utils/logger.utils.js', () => ({
   logger: {
     info: jest.fn(),
     warn: jest.fn(),
@@ -11,12 +11,12 @@ jest.mock('../../src/utils/logger.utils.js', () => ({
   }
 }));
 
-jest.mock('../../src/clients/create.client.js', () => ({
+jest.mock('../../../src/clients/create.client.js', () => ({
   createApiRoot: jest.fn()
 }));
 
-import { logger } from '../../src/utils/logger.utils.js';
-import { createApiRoot } from '../../src/clients/create.client.js';
+import { logger } from '../../../src/utils/logger.utils.js';
+import { createApiRoot } from '../../../src/clients/create.client.js';
 
 describe('ShipFromService', () => {
   let shipFromService;
