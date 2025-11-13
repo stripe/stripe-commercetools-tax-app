@@ -168,20 +168,25 @@ class UpdateActionService {
       const key = `${action.lineItemId}-${action.shippingKey || 'single'}`;
       
       if (actionsByKey.has(key)) {
-        // Combine tax amounts
+        // Combine totalGross amounts (which now include base + tax)
         const existing = actionsByKey.get(key);
-        const combinedTaxAmount = existing.externalTaxAmount.totalGross.centAmount + 
+        const combinedTotalGross = existing.externalTaxAmount.totalGross.centAmount + 
                                   action.externalTaxAmount.totalGross.centAmount;
         
         // Calculate effective rate from base amounts
-        // effective_rate = totalTaxAmount / totalBaseAmount
+        // totalGross = base + tax, so we need to extract tax to calculate rate
         const existingBase = baseAmountsByKey.get(key);
         const newBase = action._baseAmount || 0;
         const totalBase = existingBase + newBase;
         
+        // Extract tax amounts from totalGross
+        const existingTax = existing.externalTaxAmount.totalGross.centAmount - existingBase;
+        const newTax = action.externalTaxAmount.totalGross.centAmount - newBase;
+        const combinedTax = existingTax + newTax;
+        
         let effectiveRate;
         if (totalBase > 0) {
-          effectiveRate = combinedTaxAmount / totalBase; // Precise effective rate
+          effectiveRate = combinedTax / totalBase; // Precise effective rate
         } else {
           // Fallback: average of rates (reverse calculate from rates)
           const existingRate = existing.externalTaxAmount.taxRate.amount;
@@ -189,7 +194,7 @@ class UpdateActionService {
           effectiveRate = (existingRate + newRate) / 2;
         }
         
-        existing.externalTaxAmount.totalGross.centAmount = combinedTaxAmount;
+        existing.externalTaxAmount.totalGross.centAmount = combinedTotalGross;
         existing.externalTaxAmount.taxRate.amount = effectiveRate;
         baseAmountsByKey.set(key, totalBase);
       } else {
@@ -243,7 +248,7 @@ class UpdateActionService {
         externalTaxAmount: {
           totalGross: {
             currencyCode: calculation.currency?.toUpperCase() || 'USD',
-            centAmount: lineItemData.amount_tax
+            centAmount: lineItemData.amount + lineItemData.amount_tax
           },
           taxRate: {
             name: taxRateDetails?.tax_type || 'Tax',
@@ -537,7 +542,7 @@ class UpdateActionService {
           externalTaxAmount: {
             totalGross: {
               currencyCode: calculation.currency?.toUpperCase() || cart?.totalPrice?.currencyCode || 'USD',
-              centAmount: shippingTaxAmount
+              centAmount: shippingAmount + shippingTaxAmount
             },
             taxRate: {
               name: taxRateDetails.tax_type || 'shipping_tax',
@@ -618,7 +623,7 @@ class UpdateActionService {
       externalTaxAmount: {
         totalGross: {
           currencyCode: calculation.currency?.toUpperCase(),
-          centAmount: calculation.shipping_cost.amount_tax
+          centAmount: shippingAmount + shippingTaxAmount
         },
         taxRate: {
           name: taxRateDetails.tax_type || 'shipping_tax',
