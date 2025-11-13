@@ -76,9 +76,9 @@ class UpdateActionService {
       tax_amount_exclusive: calculations.reduce((sum, c) => sum + (c.tax_amount_exclusive || 0), 0),
       tax_amount_inclusive: calculations.reduce((sum, c) => sum + (c.tax_amount_inclusive || 0), 0),
       currency: calculations[0]?.currency || 'USD',
-      currencies: calculations.map(calc => calc.currency.toUpperCase()).filter(Boolean),
+      currencies: calculations.map(calc => `${calc.id}_${calc.currency.toUpperCase()}`).filter(Boolean),
       line_items: { data: allLineItems },
-      expires_at: calculations.map(calc => new Date(calc.expires_at * 1000).toISOString()).filter(Boolean),
+      expires_at: calculations.map(calc => `${calc.id}_${new Date(calc.expires_at * 1000).toISOString()}`).filter(Boolean),
       tax_breakdown: allTaxBreakdowns,
       shipping_cost: {
         amount: calculations.reduce((sum, c) => sum + (c.shipping_cost?.amount || 0), 0),
