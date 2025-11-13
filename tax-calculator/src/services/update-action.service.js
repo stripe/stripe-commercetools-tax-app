@@ -8,6 +8,7 @@ import { CART_TAX_CUSTOM_TYPE, CART_TAX_FIELD_NAMES } from '../connectors/custom
  * 2. Creates cart custom type update action
  * 3. Creates line item tax update actions
  * 4. Creates shipping tax update action(s)
+ * 5. Creates cart total tax action (REQUIRED for ExternalAmount tax mode)
  */
 class UpdateActionService {
     
@@ -35,6 +36,11 @@ class UpdateActionService {
       const lineItemActions = this.createLineItemTaxUpdateActions(calculations, shippingInfoGroups);
       updateActions.push(...lineItemActions);
       
+      // STEP 3b: Create line item total price update actions (to update cart.totalPrice with taxes included)
+      // This ensures the "Order original subtotal" shows the correct amount with taxes
+      const lineItemTotalPriceActions = this.createLineItemTotalPriceActions(calculations, shippingInfoGroups);
+      updateActions.push(...lineItemTotalPriceActions);
+      
       // STEP 4: Create shipping tax update action(s)
       // With shippingKey separation, create one action per shipping method
       if (shippingInfoGroups.length > 0) {
@@ -45,6 +51,13 @@ class UpdateActionService {
         if (shippingAction) {
           updateActions.push(shippingAction);
         }
+      }
+      
+      // STEP 5: Create cart total tax action (REQUIRED for ExternalAmount tax mode)
+      // This sets the cart's taxedPrice.totalGross, which CommerceTools uses to calculate totalTax
+      const cartTotalTaxAction = this.createCartTotalTaxAction(combinedCalculation);
+      if (cartTotalTaxAction) {
+        updateActions.push(cartTotalTaxAction);
       }
       
       logger.info(`Created ${updateActions.length} cart update actions from ${calculations.length} tax calculations`);
@@ -110,6 +123,28 @@ class UpdateActionService {
         [CART_TAX_FIELD_NAMES.CURRENCIES]: calculation.currencies,
         [CART_TAX_FIELD_NAMES.EXPIRES_AT]: calculation.expires_at,
         [CART_TAX_FIELD_NAMES.CALCULATION_TIMESTAMP]: new Date().toISOString()
+      }
+    };
+  }
+
+  /**
+   * Create cart total tax update action (REQUIRED for ExternalAmount tax mode)
+   * Sets the cart's taxedPrice.totalGross, which CommerceTools uses to calculate totalTax
+   * The amount_total from Stripe already includes line items + shipping + taxes
+   * @param {Object} calculation - Combined Stripe tax calculation response object
+   * @returns {Object|null} Commercetools setCartTotalTax update action or null if amount_total is missing
+   */
+  createCartTotalTaxAction(calculation) {
+    if (!calculation.amount_total || calculation.amount_total <= 0) {
+      logger.warn('Cannot create cart total tax action: amount_total is missing or zero');
+      return null;
+    }
+
+    return {
+      action: "setCartTotalTax",
+      externalTotalGross: {
+        currencyCode: calculation.currency?.toUpperCase() || 'USD',
+        centAmount: calculation.amount_total
       }
     };
   }
@@ -212,6 +247,103 @@ class UpdateActionService {
     });
     
     logger.info(`Created ${finalActions.length} line item tax update actions`);
+    return finalActions;
+  }
+
+  /**
+   * Create line item total price update actions from multiple calculations
+   * Updates the totalPrice of line items to include taxes, so cart.totalPrice shows the correct subtotal
+   * @param {Array} calculations - Array of Stripe calculation responses
+   * @param {Array} shippingInfoGroups - Array of shipping info groups (with shippingKey)
+   * @returns {Array} Array of setLineItemTotalPrice update actions
+   */
+  createLineItemTotalPriceActions(calculations, shippingInfoGroups = []) {
+    const actions = [];
+    
+    // Map calculations to their shippingKeys (same logic as createLineItemTaxUpdateActions)
+    const calculationToShippingKey = new Map();
+    for (const calculation of calculations) {
+      const lineItems = calculation.line_items?.data || [];
+      if (lineItems.length > 0 && lineItems[0].metadata?.shippingKey) {
+        calculationToShippingKey.set(calculation.id, lineItems[0].metadata.shippingKey);
+      }
+    }
+    
+    // Fallback: Use shippingInfoGroups if metadata is not available
+    if (calculationToShippingKey.size === 0 && shippingInfoGroups.length > 0) {
+      for (let i = 0; i < calculations.length && i < shippingInfoGroups.length; i++) {
+        const shippingInfo = shippingInfoGroups[i];
+        if (shippingInfo?.shippingKey) {
+          calculationToShippingKey.set(calculations[i].id, shippingInfo.shippingKey);
+        }
+      }
+    }
+    
+    // Process each calculation
+    for (const calculation of calculations) {
+      const shippingKey = calculationToShippingKey.get(calculation.id) || null;
+      const lineItems = calculation.line_items?.data || [];
+      
+      for (const lineItemData of lineItems) {
+        // Calculate totalPrice with taxes included
+        const totalPriceWithTax = lineItemData.amount + lineItemData.amount_tax;
+        const quantity = lineItemData.quantity || 1;
+        
+        const action = {
+          action: "setLineItemTotalPrice",
+          lineItemId: lineItemData.reference,
+          externalTotalPrice: {
+            price: {
+              currencyCode: calculation.currency?.toUpperCase() || 'USD',
+              centAmount: quantity > 0 ? Math.round(lineItemData.amount / quantity) : lineItemData.amount // Unit price
+            },
+            totalPrice: {
+              currencyCode: calculation.currency?.toUpperCase() || 'USD',
+              centAmount: totalPriceWithTax // Total price with taxes
+            }
+          },
+          _quantity: quantity // Store for duplicate handling
+        };
+        
+        // Add shippingKey if available (Multiple mode)
+        if (shippingKey) {
+          action.shippingKey = shippingKey;
+        }
+        
+        actions.push(action);
+      }
+    }
+    
+    // Handle duplicates: if same (lineItemId + shippingKey) appears in multiple calculations
+    const actionsByKey = new Map();
+    for (const action of actions) {
+      const key = `${action.lineItemId}-${action.shippingKey || 'single'}`;
+      
+      if (actionsByKey.has(key)) {
+        // Combine totalPrice amounts
+        const existing = actionsByKey.get(key);
+        const combinedTotalPrice = existing.externalTotalPrice.totalPrice.centAmount + 
+                                  action.externalTotalPrice.totalPrice.centAmount;
+        const combinedQuantity = existing._quantity + (action._quantity || 1);
+        
+        existing.externalTotalPrice.totalPrice.centAmount = combinedTotalPrice;
+        existing.externalTotalPrice.price.centAmount = combinedQuantity > 0 
+          ? Math.round(combinedTotalPrice / combinedQuantity) 
+          : combinedTotalPrice;
+        existing._quantity = combinedQuantity;
+      } else {
+        actionsByKey.set(key, { ...action });
+      }
+    }
+    
+    // Remove temporary _quantity field before returning
+    const finalActions = Array.from(actionsByKey.values()).map(action => {
+      const cleanAction = { ...action };
+      delete cleanAction._quantity;
+      return cleanAction;
+    });
+    
+    logger.info(`Created ${finalActions.length} line item total price update actions`);
     return finalActions;
   }
 
