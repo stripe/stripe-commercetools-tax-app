@@ -349,6 +349,9 @@ class UpdateActionService {
 
   /**
    * Create line item tax update actions from a single calculation
+   * IMPORTANT: Always creates an action for each line item, even if no tax breakdown is found.
+   * This is required because setLineItemTotalPrice changes priceMode to ExternalTotal,
+   * and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set.
    * @param {Object} calculation - Stripe tax calculation response
    * @param {string|null} shippingKey - Shipping method key (required for Multiple mode, null for Single)
    * @returns {Array} Array of setLineItemTaxAmount update actions
@@ -363,16 +366,35 @@ class UpdateActionService {
     // Therefore, we need to use matching logic to identify the correct breakdown
     const taxBreakdowns = calculation.tax_breakdown || [];
     
+    // Get default country from calculation (from shipping cost or first breakdown)
+    const defaultCountry = calculation.shipping_cost?.tax_breakdown?.[0]?.tax_rate_details?.country ||
+                           calculation.tax_breakdown?.[0]?.tax_rate_details?.country ||
+                           'US';
+    
     for (const lineItemData of lineItems) {
       // Find tax breakdown for this line item using matching logic
       const taxBreakdown = this.findTaxBreakdownForLineItem(lineItemData, taxBreakdowns);
       
-      if (!taxBreakdown) {
-        logger.warn(`No tax breakdown found for line item ${lineItemData.reference} in calculation ${calculation.id}`);
-        continue;
-      }
+      let taxRateDetails;
+      let totalGrossAmount;
       
-      const taxRateDetails = taxBreakdown.tax_rate_details;
+      if (taxBreakdown) {
+        // Use tax breakdown if found
+        taxRateDetails = taxBreakdown.tax_rate_details;
+        totalGrossAmount = lineItemData.amount + lineItemData.amount_tax;
+      } else {
+        // No tax breakdown found - create action with tax = 0
+        // This is required because setLineItemTotalPrice changes priceMode to ExternalTotal,
+        // and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set
+        logger.warn(`No tax breakdown found for line item ${lineItemData.reference} in calculation ${calculation.id}. Creating action with tax = 0`);
+        taxRateDetails = {
+          tax_type: 'no_tax',
+          percentage_decimal: '0',
+          country: defaultCountry
+        };
+        // If amount_tax is 0 or missing, use just the amount as totalGross
+        totalGrossAmount = lineItemData.amount + (lineItemData.amount_tax || 0);
+      }
       
       const action = {
         action: "setLineItemTaxAmount",
@@ -380,12 +402,12 @@ class UpdateActionService {
         externalTaxAmount: {
           totalGross: {
             currencyCode: calculation.currency?.toUpperCase() || 'USD',
-            centAmount: lineItemData.amount + lineItemData.amount_tax
+            centAmount: totalGrossAmount
           },
           taxRate: {
             name: taxRateDetails?.tax_type || 'Tax',
             amount: parseFloat(taxRateDetails?.percentage_decimal || 0) / 100,
-            country: taxRateDetails?.country
+            country: taxRateDetails?.country || defaultCountry
           }
         },
         _baseAmount: lineItemData.amount // Store base amount for effective rate calculation if duplicates
