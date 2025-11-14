@@ -31,8 +31,8 @@ class UpdateActionService {
       const cartCustomTypeAction = this.createCartCustomTypeUpdateAction(combinedCalculation);
       updateActions.push(cartCustomTypeAction);
       
-      // STEP 3b: Create line item total price update actions (to update cart.totalPrice with taxes included)
-      // This ensures the "Order original subtotal" shows the correct amount with taxes
+      // STEP 3b: Create line item total price update actions (to update cart.totalPrice without taxes)
+      // This sets totalPrice to the base amount (without tax), so CommerceTools can correctly calculate totalTax
       // IMPORTANT: This must be done BEFORE tax actions to ensure we can match line items
       const lineItemTotalPriceActions = this.createLineItemTotalPriceActions(calculations, shippingInfoGroups);
       updateActions.push(...lineItemTotalPriceActions);
@@ -306,7 +306,8 @@ class UpdateActionService {
 
   /**
    * Create line item total price update actions from multiple calculations
-   * Updates the totalPrice of line items to include taxes, so cart.totalPrice shows the correct subtotal
+   * Updates the totalPrice of line items to the base amount (without taxes)
+   * This allows CommerceTools to correctly calculate totalTax = totalGross - totalNet
    * @param {Array} calculations - Array of Stripe calculation responses
    * @param {Array} shippingInfoGroups - Array of shipping info groups (with shippingKey)
    * @returns {Array} Array of setLineItemTotalPrice update actions
@@ -339,8 +340,9 @@ class UpdateActionService {
       const lineItems = calculation.line_items?.data || [];
       
       for (const lineItemData of lineItems) {
-        // Calculate totalPrice with taxes included
-        const totalPriceWithTax = lineItemData.amount + lineItemData.amount_tax;
+        // Set totalPrice to base amount (without taxes)
+        // CommerceTools will set totalNet = totalPrice, and totalTax will be calculated as totalGross - totalNet
+        const totalPriceBase = lineItemData.amount;
         const quantity = lineItemData.quantity || 1;
         
         const action = {
@@ -353,7 +355,7 @@ class UpdateActionService {
             },
             totalPrice: {
               currencyCode: calculation.currency?.toUpperCase() || 'USD',
-              centAmount: totalPriceWithTax // Total price with taxes
+              centAmount: totalPriceBase // Total price without taxes (base amount)
             }
           },
           _quantity: quantity // Store for duplicate handling
