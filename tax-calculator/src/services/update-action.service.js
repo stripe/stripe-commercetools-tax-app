@@ -31,15 +31,17 @@ class UpdateActionService {
       const cartCustomTypeAction = this.createCartCustomTypeUpdateAction(combinedCalculation);
       updateActions.push(cartCustomTypeAction);
       
-      // STEP 3: Create line item tax update actions
-      // With shippingKey separation, create one action per (lineItemId + shippingKey) combination
-      const lineItemActions = this.createLineItemTaxUpdateActions(calculations, shippingInfoGroups);
-      updateActions.push(...lineItemActions);
-      
       // STEP 3b: Create line item total price update actions (to update cart.totalPrice with taxes included)
       // This ensures the "Order original subtotal" shows the correct amount with taxes
+      // IMPORTANT: This must be done BEFORE tax actions to ensure we can match line items
       const lineItemTotalPriceActions = this.createLineItemTotalPriceActions(calculations, shippingInfoGroups);
       updateActions.push(...lineItemTotalPriceActions);
+      
+      // STEP 3: Create line item tax update actions
+      // With shippingKey separation, create one action per (lineItemId + shippingKey) combination
+      // IMPORTANT: This must include ALL line items that have setLineItemTotalPrice
+      const lineItemActions = this.createLineItemTaxUpdateActions(calculations, shippingInfoGroups, lineItemTotalPriceActions, cart);
+      updateActions.push(...lineItemActions);
       
       // STEP 4: Create shipping tax update action(s)
       // With shippingKey separation, create one action per shipping method
@@ -154,11 +156,14 @@ class UpdateActionService {
    * Creates one action per (lineItemId + shippingKey) combination
    * Each calculation's line items are processed directly with their corresponding shippingKey
    * This ensures precise tax breakdowns without combining or averaging rates
+   * IMPORTANT: Ensures all line items with setLineItemTotalPrice also have setLineItemTaxAmount
    * @param {Array} calculations - Array of Stripe calculation responses
    * @param {Array} shippingInfoGroups - Array of shipping info groups (with shippingKey)
+   * @param {Array} lineItemTotalPriceActions - Array of setLineItemTotalPrice actions (to ensure coverage)
+   * @param {Object} cart - Commercetools cart (optional, for fallback country)
    * @returns {Array} Array of setLineItemTaxAmount update actions
    */
-  createLineItemTaxUpdateActions(calculations, shippingInfoGroups = []) {
+  createLineItemTaxUpdateActions(calculations, shippingInfoGroups = [], lineItemTotalPriceActions = [], cart = null) {
     const actions = [];
     
     // Map calculations to their shippingKeys
@@ -189,7 +194,8 @@ class UpdateActionService {
       // Create actions for line items in this calculation
       const calculationActions = this.createLineItemActionsFromCalculation(
         calculation,
-        shippingKey // null for Single mode, shippingKey for Multiple mode
+        shippingKey, // null for Single mode, shippingKey for Multiple mode
+        cart // Pass cart for fallback country
       );
       
       actions.push(...calculationActions);
@@ -236,6 +242,54 @@ class UpdateActionService {
         actionsByKey.set(key, { ...action });
         // Store base amount for effective rate calculation (from lineItemData.amount)
         baseAmountsByKey.set(key, action._baseAmount || 0);
+      }
+    }
+    
+    // CRITICAL: Ensure all line items with setLineItemTotalPrice also have setLineItemTaxAmount
+    // This is required because setLineItemTotalPrice changes priceMode to ExternalTotal,
+    // and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set
+    const totalPriceActionsByKey = new Map();
+    for (const totalPriceAction of lineItemTotalPriceActions) {
+      const key = `${totalPriceAction.lineItemId}-${totalPriceAction.shippingKey || 'single'}`;
+      totalPriceActionsByKey.set(key, totalPriceAction);
+    }
+    
+    // Check for missing tax actions
+    for (const [key, totalPriceAction] of totalPriceActionsByKey.entries()) {
+      if (!actionsByKey.has(key)) {
+        // This line item has setLineItemTotalPrice but no setLineItemTaxAmount
+        // Create a tax action with tax = 0 to satisfy CommerceTools requirement
+        logger.warn(`Line item ${totalPriceAction.lineItemId} has setLineItemTotalPrice but no tax calculation. Creating tax action with tax = 0`);
+        
+        const defaultCountry = cart?.country || cart?.shippingAddress?.country || 'US';
+        const currencyCode = totalPriceAction.externalTotalPrice?.totalPrice?.currencyCode || 
+                            totalPriceAction.externalTotalPrice?.price?.currencyCode || 
+                            cart?.totalPrice?.currencyCode || 
+                            'USD';
+        const totalPrice = totalPriceAction.externalTotalPrice?.totalPrice?.centAmount || 0;
+        
+        const missingTaxAction = {
+          action: "setLineItemTaxAmount",
+          lineItemId: totalPriceAction.lineItemId,
+          externalTaxAmount: {
+            totalGross: {
+              currencyCode: currencyCode,
+              centAmount: totalPrice // Use totalPrice as totalGross (tax = 0)
+            },
+            taxRate: {
+              name: 'no_tax',
+              amount: 0,
+              country: defaultCountry
+            }
+          }
+        };
+        
+        // Add shippingKey if present in totalPriceAction
+        if (totalPriceAction.shippingKey) {
+          missingTaxAction.shippingKey = totalPriceAction.shippingKey;
+        }
+        
+        actionsByKey.set(key, missingTaxAction);
       }
     }
     
@@ -354,9 +408,10 @@ class UpdateActionService {
    * and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set.
    * @param {Object} calculation - Stripe tax calculation response
    * @param {string|null} shippingKey - Shipping method key (required for Multiple mode, null for Single)
+   * @param {Object} cart - Commercetools cart (optional, for fallback country)
    * @returns {Array} Array of setLineItemTaxAmount update actions
    */
-  createLineItemActionsFromCalculation(calculation, shippingKey = null) {
+  createLineItemActionsFromCalculation(calculation, shippingKey = null, cart = null) {
     const actions = [];
     const lineItems = calculation.line_items?.data || [];
     
@@ -367,8 +422,11 @@ class UpdateActionService {
     const taxBreakdowns = calculation.tax_breakdown || [];
     
     // Get default country from calculation (from shipping cost or first breakdown)
+    // Fallback to cart country if available
     const defaultCountry = calculation.shipping_cost?.tax_breakdown?.[0]?.tax_rate_details?.country ||
                            calculation.tax_breakdown?.[0]?.tax_rate_details?.country ||
+                           cart?.country ||
+                           cart?.shippingAddress?.country ||
                            'US';
     
     for (const lineItemData of lineItems) {
