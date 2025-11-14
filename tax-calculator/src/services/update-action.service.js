@@ -562,16 +562,34 @@ class UpdateActionService {
    * @param {string} shippingKey - Shipping method key
    * @param {Object} calculation - Calculation object (for currency/country)
    * @param {Object} cart - Cart object (for fallback values)
+   * @param {number} shippingAmount - Shipping amount (if available, otherwise defaults to 0)
    * @returns {Object} Shipping tax action
    */
-  createZeroTaxShippingAction(shippingKey, calculation = null, cart = null) {
+  createZeroTaxShippingAction(shippingKey, calculation = null, cart = null, shippingAmount = 0) {
+    // If shippingAmount not provided, try to get it from calculation or cart
+    if (shippingAmount === 0) {
+      if (calculation?.shipping_cost?.amount) {
+        shippingAmount = calculation.shipping_cost.amount;
+      } else if (cart?.shipping) {
+        // Try to find shipping amount from cart shipping methods
+        const shippingMethod = Array.isArray(cart.shipping) 
+          ? cart.shipping.find(s => s.shippingKey === shippingKey)
+          : cart.shipping;
+        if (shippingMethod?.shippingInfo?.price?.centAmount) {
+          shippingAmount = shippingMethod.shippingInfo.price.centAmount;
+        } else if (cart.shippingInfo?.price?.centAmount) {
+          shippingAmount = cart.shippingInfo.price.centAmount;
+        }
+      }
+    }
+    
     return {
       action: "setShippingMethodTaxAmount",
       shippingKey: shippingKey,
       externalTaxAmount: {
         totalGross: {
           currencyCode: calculation?.currency?.toUpperCase() || cart?.totalPrice?.currencyCode || 'USD',
-          centAmount: 0
+          centAmount: shippingAmount
         },
         taxRate: {
           name: 'no_shipping_tax',
@@ -728,13 +746,13 @@ class UpdateActionService {
           logger.warn(`No shippingInfo found for shippingKey ${shippingKey}, using calculation data`);
         }
         
-        if (!calculation.shipping_cost || calculation.shipping_cost.amount_tax <= 0) {
-          shippingActions.push(this.createZeroTaxShippingAction(shippingKey, calculation, cart));
+        const shippingAmount = calculation.shipping_cost?.amount || 0;
+        const shippingTaxAmount = calculation.shipping_cost?.amount_tax || 0;
+        
+        if (!calculation.shipping_cost || shippingTaxAmount <= 0) {
+          shippingActions.push(this.createZeroTaxShippingAction(shippingKey, calculation, cart, shippingAmount));
           continue;
         }
-        
-        const shippingAmount = calculation.shipping_cost.amount;
-        const shippingTaxAmount = calculation.shipping_cost.amount_tax;
         
         const taxBreakdown = this.findOrCreateShippingTaxBreakdown(
           calculation, 
@@ -744,7 +762,7 @@ class UpdateActionService {
         
         if (!taxBreakdown) {
           logger.warn(`No tax breakdown found for shipping method ${shippingKey}, creating action with tax = 0`);
-          shippingActions.push(this.createZeroTaxShippingAction(shippingKey, calculation, cart));
+          shippingActions.push(this.createZeroTaxShippingAction(shippingKey, calculation, cart, shippingAmount));
           continue;
         }
         
@@ -768,7 +786,17 @@ class UpdateActionService {
         
       } else {
         logger.info(`No calculation found for shippingKey ${shippingKey}, creating action with tax = 0`);
-        shippingActions.push(this.createZeroTaxShippingAction(shippingKey, null, cart));
+        // Try to get shipping amount from cart
+        let shippingAmount = 0;
+        if (cart?.shipping) {
+          const shippingMethod = Array.isArray(cart.shipping) 
+            ? cart.shipping.find(s => s.shippingKey === shippingKey)
+            : cart.shipping;
+          if (shippingMethod?.shippingInfo?.price?.centAmount) {
+            shippingAmount = shippingMethod.shippingInfo.price.centAmount;
+          }
+        }
+        shippingActions.push(this.createZeroTaxShippingAction(shippingKey, null, cart, shippingAmount));
       }
     }
     
@@ -782,13 +810,16 @@ class UpdateActionService {
    * @returns {Object|null} Commercetools setShippingMethodTaxAmount update action or null
    */
   createShippingTaxUpdateAction(calculation) {
-    if (!calculation.shipping_cost || calculation.shipping_cost.amount_tax <= 0) 
+    const shippingAmount = calculation.shipping_cost?.amount || 0;
+    const shippingTaxAmount = calculation.shipping_cost?.amount_tax || 0;
+    
+    if (!calculation.shipping_cost || shippingTaxAmount <= 0) {
       return {
         action: "setShippingMethodTaxAmount",
         externalTaxAmount: {
           totalGross: {
             currencyCode: calculation.currency?.toUpperCase(),
-            centAmount: 0
+            centAmount: shippingAmount
           },
           taxRate: {
             name: 'no_shipping_tax',
@@ -797,9 +828,7 @@ class UpdateActionService {
           }
         }
       };
-    
-    const shippingAmount = calculation.shipping_cost.amount;
-    const shippingTaxAmount = calculation.shipping_cost.amount_tax;
+    }
 
     let taxBreakdown = this.findByDirectCalculation(
       shippingAmount, 
