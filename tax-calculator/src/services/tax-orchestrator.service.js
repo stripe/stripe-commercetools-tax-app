@@ -271,6 +271,7 @@ class TaxOrchestratorService {
   /**
    * Create separate requests by shippingKey (one per shipping method)
    * Provides exact precision and direct mapping to Commercetools shipping methods
+   * OPTIMIZED: Parallel fetching of shipping costs instead of sequential
    * @param {Object} group - Ship-from group
    * @param {Object} cart - Original cart
    * @param {Object} taxBehaviors - Tax behavior map for line items
@@ -279,6 +280,15 @@ class TaxOrchestratorService {
    */
   async createSeparatedRequestsByShippingKey(group, cart, taxBehaviors, categoriesMap) {
     const requests = [];
+    
+    // OPTIMIZATION: Fetch all shipping costs in parallel
+    const shippingCostPromises = cart.shipping.map(shipping => 
+      this.getShippingCostForShippingMethod(shipping).then(cost => ({ shipping, cost }))
+    );
+    const shippingCostsResults = await Promise.all(shippingCostPromises);
+    const shippingCostsMap = new Map(
+      shippingCostsResults.map(({ shipping, cost }) => [shipping.shippingKey, cost])
+    );
     
     // Create one request per shipping method
     for (const shipping of cart.shipping) {
@@ -316,8 +326,8 @@ class TaxOrchestratorService {
         }
       }
       
-      // Add shipping cost for this specific shipping method
-      const shippingCost = await this.getShippingCostForShippingMethod(shipping);
+      // Add shipping cost for this specific shipping method (from pre-fetched map)
+      const shippingCost = shippingCostsMap.get(shipping.shippingKey);
       if (shippingCost?.amount) {
         request.shipping_cost = {
           amount: shippingCost.amount,

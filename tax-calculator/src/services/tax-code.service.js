@@ -14,7 +14,9 @@ import { createApiRoot } from '../clients/create.client.js';
  */
 class TaxCodeService {
   constructor() {
-    // No initialization needed - stateless service
+    // Cache for shipping methods to avoid repeated API calls
+    this.shippingMethodCache = new Map();
+    this.cacheTTL = 5 * 60 * 1000; // 5 minutes
   }
 
   /**
@@ -272,10 +274,18 @@ class TaxCodeService {
 
   /**
    * Fetch shipping method from commercetools API by ID
+   * OPTIMIZED: Uses cache to avoid repeated API calls for the same shipping method
    * @param {string} shippingMethodId - Shipping method ID
    * @returns {Promise<Object>} Shipping method object with custom fields
    */
   async getShippingMethodById(shippingMethodId) {
+    // Check cache first
+    const cached = this.shippingMethodCache.get(shippingMethodId);
+    if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
+      logger.debug('Shipping method retrieved from cache', { shippingMethodId });
+      return cached.shippingMethod;
+    }
+    
     try {
       const apiRoot = createApiRoot();
       const response = await apiRoot
@@ -284,7 +294,16 @@ class TaxCodeService {
         .get()
         .execute();
       
-      return response.body;
+      const shippingMethod = response.body;
+      
+      // Save to cache
+      this.shippingMethodCache.set(shippingMethodId, {
+        shippingMethod,
+        timestamp: Date.now()
+      });
+      
+      logger.debug('Shipping method fetched and cached', { shippingMethodId });
+      return shippingMethod;
     } catch (error) {
       logger.error('Error fetching shipping method from API', {
         shippingMethodId,
@@ -292,6 +311,14 @@ class TaxCodeService {
       });
       throw error;
     }
+  }
+  
+  /**
+   * Clears the shipping method cache (useful for testing or when you need to force refresh)
+   */
+  clearShippingMethodCache() {
+    this.shippingMethodCache.clear();
+    logger.debug('Shipping method cache cleared');
   }
 
   /**

@@ -4,6 +4,11 @@ import { VALID_TAX_BEHAVIORS } from '../constants/tax-behavior.constants.js';
 
 class TaxBehaviorService {
   constructor() {
+    // Cache for configuration and parsed JSON to avoid repeated I/O and parsing
+    this.configCache = null;
+    this.configCacheTimestamp = 0;
+    this.countryMappingCache = null;
+    this.cacheTTL = 5 * 60 * 1000; // 5 minutes
   }
 
   /**
@@ -79,10 +84,11 @@ class TaxBehaviorService {
 
   /**
    * Get merchant-wide default tax behavior from configuration
+   * OPTIMIZED: Uses cached configuration to avoid repeated I/O
    */
   getMerchantDefaultBehavior() {
     try {
-      const config = configUtils.readConfiguration();
+      const config = this.getCachedConfiguration();
       const merchantBehavior = config.taxBehaviorDefault;
       
       if (merchantBehavior && this.isValidBehavior(merchantBehavior)) {
@@ -98,20 +104,46 @@ class TaxBehaviorService {
 
   /**
    * Get country to tax behavior mapping from environment variable
+   * OPTIMIZED: Uses cached parsed JSON to avoid repeated parsing
    */
   getCountryTaxBehaviorMapping() {
+    // Check cache first
+    if (this.countryMappingCache && Date.now() - this.configCacheTimestamp < this.cacheTTL) {
+      return this.countryMappingCache;
+    }
+    
     try {
-      const config = configUtils.readConfiguration();
+      const config = this.getCachedConfiguration();
       const countryMappingJson = config.countryTaxBehaviorMapping;
       
       if (countryMappingJson) {
-        return JSON.parse(countryMappingJson);
+        const parsed = JSON.parse(countryMappingJson);
+        // Cache the parsed result
+        this.countryMappingCache = parsed;
+        return parsed;
       }
     } catch (error) {
       logger.warn(`Error parsing country tax behavior mapping: ${error.message}`);
     }
 
     return {};
+  }
+  
+  /**
+   * Get cached configuration to avoid repeated I/O
+   * @returns {Object} Configuration object
+   * @private
+   */
+  getCachedConfiguration() {
+    // Check if cache is valid
+    if (this.configCache && Date.now() - this.configCacheTimestamp < this.cacheTTL) {
+      return this.configCache;
+    }
+    
+    // Read and cache configuration
+    this.configCache = configUtils.readConfiguration();
+    this.configCacheTimestamp = Date.now();
+    return this.configCache;
   }
 
 
