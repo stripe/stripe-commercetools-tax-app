@@ -138,9 +138,6 @@ class CategoryService {
       staged: staged,
       expand: [
         'categories[*]',
-        'categories[*].custom',
-        'categories[*].parent',
-        'categories[*].parent.custom'
       ],
       limit: 500
     };
