@@ -102,7 +102,7 @@ class TaxCodeService {
     
     // For each category assigned to the product
     for (const category of categories) {
-      const taxCode = category?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME]; //this.findFirstTaxCodeInHierarchy(category, processedCategories);
+      const taxCode = category?.custom?.fields?.[TAX_CODE_CUSTOM_TYPE_NAME];
       if (taxCode) {
         return taxCode;
       }

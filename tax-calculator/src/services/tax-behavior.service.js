@@ -144,6 +144,15 @@ class TaxBehaviorService {
     return this.configCache;
   }
 
+  /**
+   * Clear all caches (useful for testing)
+   */
+  clearCache() {
+    this.configCache = null;
+    this.configCacheTimestamp = 0;
+    this.countryMappingCache = null;
+  }
+
 
   /**
    * Validate tax behavior value

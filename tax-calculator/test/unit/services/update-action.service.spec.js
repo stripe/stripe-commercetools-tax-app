@@ -80,7 +80,15 @@ describe('UpdateActionService', () => {
 
       expect(result1).toBeInstanceOf(Array);
       expect(result1.length).toBeGreaterThan(0);
-      expect(result1[0].action).toBe('setCustomType');
+      
+      // Verify all action types are created
+      const actionTypes = result1.map(a => a.action);
+      expect(actionTypes).toContain('setCustomType');
+      expect(actionTypes).toContain('setLineItemTotalPrice');
+      expect(actionTypes).toContain('setLineItemTaxAmount');
+      expect(actionTypes).toContain('setShippingMethodTaxAmount');
+      expect(actionTypes).toContain('setCartTotalTax');
+      
       expect(logger.info).toHaveBeenCalled();
 
       // Test without shipping info groups
@@ -159,7 +167,8 @@ describe('UpdateActionService', () => {
       expect(result.amount_total).toBe(3000);
       expect(result.tax_amount_exclusive).toBe(300);
       expect(result.tax_amount_inclusive).toBe(3300);
-      expect(result.currencies).toEqual(['USD', 'USD']);
+      // currencies format: `${calc.id}_${currency.toUpperCase()}`
+      expect(result.currencies).toEqual(['calc_1_USD', 'calc_2_USD']);
       expect(result.line_items.data).toHaveLength(2);
       expect(result.shipping_cost.amount).toBe(1500);
       expect(result.shipping_cost.amount_tax).toBe(150);
@@ -274,7 +283,14 @@ describe('UpdateActionService', () => {
         }
       ];
 
-      const result1 = updateActionService.createLineItemTaxUpdateActions(calculations, shippingInfoGroups);
+      // Create line item total price actions first (required parameter)
+      const lineItemTotalPriceActions = updateActionService.createLineItemTotalPriceActions(calculations, shippingInfoGroups);
+      
+      const result1 = updateActionService.createLineItemTaxUpdateActions(
+        calculations, 
+        shippingInfoGroups,
+        lineItemTotalPriceActions
+      );
       expect(result1).toBeInstanceOf(Array);
       expect(result1.length).toBeGreaterThan(0);
       expect(result1[0].action).toBe('setLineItemTaxAmount');
@@ -342,15 +358,29 @@ describe('UpdateActionService', () => {
         }
       ];
 
-      const result2 = updateActionService.createLineItemTaxUpdateActions(
+      const duplicateLineItemTotalPriceActions = updateActionService.createLineItemTotalPriceActions(
         duplicateCalculations,
         duplicateShippingGroups
       );
+      
+      const result2 = updateActionService.createLineItemTaxUpdateActions(
+        duplicateCalculations,
+        duplicateShippingGroups,
+        duplicateLineItemTotalPriceActions
+      );
       expect(result2.length).toBe(1);
-      expect(result2[0].externalTaxAmount.totalGross.centAmount).toBe(200);
+      // Combined totalGross: (1000 + 100) + (1000 + 100) = 2200
+      // Each calculation has amount=1000, amount_tax=100, so totalGross = 1100 each
+      // Combined: 1100 + 1100 = 2200
+      expect(result2[0].externalTaxAmount.totalGross.centAmount).toBe(2200);
 
       // Test without shipping info groups
-      const result3 = updateActionService.createLineItemTaxUpdateActions(calculations);
+      const lineItemTotalPriceActions3 = updateActionService.createLineItemTotalPriceActions(calculations);
+      const result3 = updateActionService.createLineItemTaxUpdateActions(
+        calculations,
+        [],
+        lineItemTotalPriceActions3
+      );
       expect(result3).toBeInstanceOf(Array);
     });
   });
@@ -381,18 +411,19 @@ describe('UpdateActionService', () => {
         ]
       };
 
-      // Test with shippingKey
-      const result1 = updateActionService.createLineItemActionsFromCalculation(calculation, 'shipping-key-1');
+      // Test with shippingKey and cart
+      const cart = { country: 'US', shippingAddress: { country: 'US' } };
+      const result1 = updateActionService.createLineItemActionsFromCalculation(calculation, 'shipping-key-1', cart);
       expect(result1).toHaveLength(1);
       expect(result1[0].action).toBe('setLineItemTaxAmount');
       expect(result1[0].lineItemId).toBe('line-item-1');
       expect(result1[0].shippingKey).toBe('shipping-key-1');
-      expect(result1[0].externalTaxAmount.totalGross.centAmount).toBe(100);
+      expect(result1[0].externalTaxAmount.totalGross.centAmount).toBe(1100); // amount (1000) + amount_tax (100)
       expect(result1[0].externalTaxAmount.taxRate.name).toBe('sales_tax');
       expect(result1[0].externalTaxAmount.taxRate.amount).toBe(0.1);
 
       // Test without shippingKey
-      const result2 = updateActionService.createLineItemActionsFromCalculation(calculation);
+      const result2 = updateActionService.createLineItemActionsFromCalculation(calculation, null, cart);
       expect(result2[0].shippingKey).toBeUndefined();
 
       // Test without line items
@@ -402,9 +433,9 @@ describe('UpdateActionService', () => {
         line_items: { data: [] },
         tax_breakdown: []
       };
-      expect(updateActionService.createLineItemActionsFromCalculation(calcNoLineItems)).toHaveLength(0);
+      expect(updateActionService.createLineItemActionsFromCalculation(calcNoLineItems, null, cart)).toHaveLength(0);
 
-      // Test without tax breakdown
+      // Test without tax breakdown - should still create action with tax = 0
       const calcNoBreakdown = {
         id: 'calc_123',
         currency: 'usd',
@@ -413,14 +444,16 @@ describe('UpdateActionService', () => {
             {
               reference: 'line-item-1',
               amount: 1000,
-              amount_tax: 100
+              amount_tax: 0
             }
           ]
         },
         tax_breakdown: []
       };
-      const result3 = updateActionService.createLineItemActionsFromCalculation(calcNoBreakdown);
-      expect(result3).toHaveLength(0);
+      const result3 = updateActionService.createLineItemActionsFromCalculation(calcNoBreakdown, null, cart);
+      expect(result3).toHaveLength(1); // Should create action even without breakdown
+      expect(result3[0].externalTaxAmount.totalGross.centAmount).toBe(1000); // amount + 0 tax
+      expect(result3[0].externalTaxAmount.taxRate.amount).toBe(0);
       expect(logger.warn).toHaveBeenCalled();
 
       // Test missing currency - defaults to USD
@@ -445,8 +478,172 @@ describe('UpdateActionService', () => {
           }
         ]
       };
-      const result4 = updateActionService.createLineItemActionsFromCalculation(calcNoCurrency);
+      const result4 = updateActionService.createLineItemActionsFromCalculation(calcNoCurrency, null, cart);
       expect(result4[0].externalTaxAmount.totalGross.currencyCode).toBe('USD');
+    });
+  });
+
+  describe('createLineItemTotalPriceActions', () => {
+    it('should create setLineItemTotalPrice actions for each line item', () => {
+      const calculations = [
+        {
+          id: 'calc_1',
+          currency: 'usd',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1',
+                amount: 1000,
+                quantity: 2
+              },
+              {
+                reference: 'line-item-2',
+                amount: 2000,
+                quantity: 1
+              }
+            ]
+          }
+        }
+      ];
+
+      const shippingInfoGroups = [
+        {
+          shippingKey: 'shipping-key-1',
+          lineItems: ['line-item-1', 'line-item-2']
+        }
+      ];
+
+      const result = updateActionService.createLineItemTotalPriceActions(calculations, shippingInfoGroups);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].action).toBe('setLineItemTotalPrice');
+      expect(result[0].lineItemId).toBe('line-item-1');
+      expect(result[0].shippingKey).toBe('shipping-key-1');
+      expect(result[0].externalTotalPrice.totalPrice.centAmount).toBe(1000);
+      expect(result[0].externalTotalPrice.price.centAmount).toBe(500); // 1000 / 2
+      
+      expect(result[1].lineItemId).toBe('line-item-2');
+      expect(result[1].externalTotalPrice.totalPrice.centAmount).toBe(2000);
+      expect(result[1].externalTotalPrice.price.centAmount).toBe(2000); // 2000 / 1
+      
+      expect(logger.info).toHaveBeenCalled();
+    });
+
+    it('should combine duplicates when same lineItemId + shippingKey appears in multiple calculations', () => {
+      const calculations = [
+        {
+          id: 'calc_1',
+          currency: 'usd',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1',
+                amount: 1000,
+                quantity: 1
+              }
+            ]
+          }
+        },
+        {
+          id: 'calc_2',
+          currency: 'usd',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1',
+                amount: 500,
+                quantity: 1
+              }
+            ]
+          }
+        }
+      ];
+
+      const shippingInfoGroups = [
+        {
+          shippingKey: 'shipping-key-1',
+          lineItems: ['line-item-1']
+        },
+        {
+          shippingKey: 'shipping-key-1',
+          lineItems: ['line-item-1']
+        }
+      ];
+
+      const result = updateActionService.createLineItemTotalPriceActions(calculations, shippingInfoGroups);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].externalTotalPrice.totalPrice.centAmount).toBe(1500); // 1000 + 500
+      expect(result[0].externalTotalPrice.price.centAmount).toBe(750); // 1500 / 2
+    });
+
+    it('should handle Single mode (no shippingKey)', () => {
+      const calculations = [
+        {
+          id: 'calc_1',
+          currency: 'usd',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1',
+                amount: 1000,
+                quantity: 1
+              }
+            ]
+          }
+        }
+      ];
+
+      const result = updateActionService.createLineItemTotalPriceActions(calculations, []);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].shippingKey).toBeUndefined();
+    });
+  });
+
+  describe('createCartTotalTaxAction', () => {
+    it('should create setCartTotalTax action with amount_total', () => {
+      const calculation = {
+        currency: 'usd',
+        amount_total: 1500
+      };
+
+      const result = updateActionService.createCartTotalTaxAction(calculation);
+
+      expect(result).toBeDefined();
+      expect(result.action).toBe('setCartTotalTax');
+      expect(result.externalTotalGross.currencyCode).toBe('USD');
+      expect(result.externalTotalGross.centAmount).toBe(1500);
+    });
+
+    it('should return null when amount_total is missing or zero', () => {
+      const calculation1 = {
+        currency: 'usd'
+      };
+
+      const result1 = updateActionService.createCartTotalTaxAction(calculation1);
+      expect(result1).toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Cannot create cart total tax action: amount_total is missing or zero'
+      );
+
+      const calculation2 = {
+        currency: 'usd',
+        amount_total: 0
+      };
+
+      const result2 = updateActionService.createCartTotalTaxAction(calculation2);
+      expect(result2).toBeNull();
+    });
+
+    it('should handle missing currency and default to USD', () => {
+      const calculation = {
+        amount_total: 1500
+      };
+
+      const result = updateActionService.createCartTotalTaxAction(calculation);
+
+      expect(result.externalTotalGross.currencyCode).toBe('USD');
     });
   });
 
@@ -505,7 +702,7 @@ describe('UpdateActionService', () => {
       expect(result2.tax_rate_details.tax_type).toBe('sales_tax');
 
       // Test no breakdown found
-      expect(updateActionService.findTaxBreakdownForLineItem(lineItemTaxData, [])).toBeUndefined();
+      expect(updateActionService.findTaxBreakdownForLineItem(lineItemTaxData, [])).toBeNull();
 
       // Test breakdown without percentage_decimal
       const taxBreakdowns3 = [
@@ -555,7 +752,8 @@ describe('UpdateActionService', () => {
       expect(result1).toHaveLength(1);
       expect(result1[0].action).toBe('setShippingMethodTaxAmount');
       expect(result1[0].shippingKey).toBe('shipping-key-1');
-      expect(result1[0].externalTaxAmount.totalGross.centAmount).toBe(50);
+      // totalGross = shippingAmount + shippingTaxAmount = 500 + 50 = 550
+      expect(result1[0].externalTaxAmount.totalGross.centAmount).toBe(550);
       expect(logger.info).toHaveBeenCalled();
 
       // Test zero tax
@@ -579,7 +777,8 @@ describe('UpdateActionService', () => {
         }
       ];
       const result2 = updateActionService.createMultipleShippingTaxUpdateActions(calcZeroTax, shippingInfoGroups);
-      expect(result2[0].externalTaxAmount.totalGross.centAmount).toBe(0);
+      // totalGross = shippingAmount + shippingTaxAmount = 500 + 0 = 500
+      expect(result2[0].externalTaxAmount.totalGross.centAmount).toBe(500);
       expect(result2[0].externalTaxAmount.taxRate.amount).toBe(0);
 
       // Test missing tax breakdown
@@ -596,7 +795,8 @@ describe('UpdateActionService', () => {
       ];
       const result3 = updateActionService.createMultipleShippingTaxUpdateActions(calcNoBreakdown, shippingInfoGroups);
       expect(result3).toHaveLength(1);
-      expect(result3[0].externalTaxAmount.totalGross.centAmount).toBe(0);
+      // totalGross = shippingAmount + shippingTaxAmount = 500 + 0 = 500 (when no breakdown found, creates zero tax action)
+      expect(result3[0].externalTaxAmount.totalGross.centAmount).toBe(500);
       expect(logger.warn).toHaveBeenCalled();
     });
   });
@@ -623,7 +823,8 @@ describe('UpdateActionService', () => {
 
       const result1 = updateActionService.createShippingTaxUpdateAction(calculation);
       expect(result1.action).toBe('setShippingMethodTaxAmount');
-      expect(result1.externalTaxAmount.totalGross.centAmount).toBe(50);
+      // totalGross = shippingAmount + shippingTaxAmount = 500 + 50 = 550
+      expect(result1.externalTaxAmount.totalGross.centAmount).toBe(550);
       expect(result1.externalTaxAmount.taxRate.name).toBe('shipping_tax');
       expect(result1.externalTaxAmount.taxRate.amount).toBe(0.1);
 
@@ -645,7 +846,8 @@ describe('UpdateActionService', () => {
         ]
       };
       const result2 = updateActionService.createShippingTaxUpdateAction(calcZeroTax);
-      expect(result2.externalTaxAmount.totalGross.centAmount).toBe(0);
+      // totalGross = shippingAmount + shippingTaxAmount = 500 + 0 = 500
+      expect(result2.externalTaxAmount.totalGross.centAmount).toBe(500);
       expect(result2.externalTaxAmount.taxRate.amount).toBe(0);
 
       // Test finding breakdown in general tax_breakdown
@@ -668,7 +870,8 @@ describe('UpdateActionService', () => {
       };
       const result3 = updateActionService.createShippingTaxUpdateAction(calcGeneralBreakdown);
       expect(result3).toBeDefined();
-      expect(result3.externalTaxAmount.totalGross.centAmount).toBe(50);
+      // totalGross = shippingAmount + shippingTaxAmount = 500 + 50 = 550
+      expect(result3.externalTaxAmount.totalGross.centAmount).toBe(550);
 
       // Test no breakdown found
       const calcNoBreakdown = {

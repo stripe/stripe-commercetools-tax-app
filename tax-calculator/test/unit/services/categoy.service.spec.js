@@ -124,8 +124,10 @@ describe('CategoryService', () => {
       expect(result2.size).toBe(1);
       expect(mockProductProjections.execute).not.toHaveBeenCalled();
       expect(logger.debug).toHaveBeenCalledWith(
-        'Categories retrieved from cache',
-        expect.any(Object)
+        'Categories retrieved from cache (full hit)',
+        expect.objectContaining({
+          productsCount: 1
+        })
       );
     });
 
@@ -234,10 +236,7 @@ describe('CategoryService', () => {
           where: 'id in ("product-1", "product-2")',
           staged: false,
           expand: [
-            'categories[*]',
-            'categories[*].custom',
-            'categories[*].parent',
-            'categories[*].parent.custom'
+            'categories[*]'
           ],
           limit: 500
         })
@@ -365,7 +364,12 @@ describe('CategoryService', () => {
 
       expect(result1.get('product-1')).toEqual([{ id: 'cat-1' }]);
       expect(result2.get('product-2')).toEqual([{ id: 'cat-2' }]);
-      expect(result3).toBeNull(); // Not all products in cache
+      // getFromCache returns partial cache (Map with available products) when not all products are cached
+      // This allows incremental fetching instead of discarding partial cache
+      expect(result3).toBeInstanceOf(Map);
+      expect(result3.size).toBe(1); // Only product-1 is in cache for this key
+      expect(result3.get('product-1')).toEqual([{ id: 'cat-1' }]);
+      expect(result3.has('product-2')).toBe(false); // product-2 is not in this cache key
     });
 
     it('should clear cache and initialize with empty cache', () => {

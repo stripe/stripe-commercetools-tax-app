@@ -54,6 +54,9 @@ describe('TaxCodeService', () => {
       taxCodeMappingConfig.getTaxCodeForCategory = jest.fn().mockReturnValue(null);
     }
     
+    // Clear shipping method cache before each test
+    taxCodeService.clearShippingMethodCache();
+    
     jest.clearAllMocks();
     taxCodeMappingConfig.getTaxCodeForCategory.mockReturnValue(null);
   });
@@ -65,7 +68,7 @@ describe('TaxCodeService', () => {
   });
 
   describe('getTaxCodeForProduct', () => {
-    it('should return tax code from category custom type or parent hierarchy', () => {
+    it('should return tax code from category custom type (direct categories only)', () => {
       const cartLineItem = {
         id: 'line-item-1',
         productId: 'product-1',
@@ -96,7 +99,7 @@ describe('TaxCodeService', () => {
         })
       );
 
-      // Test parent category tax code
+      // Test category without tax code (parent hierarchy is NOT searched)
       const productCategories2 = [
         {
           id: 'category-1',
@@ -114,8 +117,10 @@ describe('TaxCodeService', () => {
         }
       ];
 
-      const result2 = taxCodeService.getTaxCodeForProduct(cartLineItem, productCategories2);
-      expect(result2).toBe('txcd_22222222');
+      // Should throw error because no tax code found in direct categories
+      expect(() => {
+        taxCodeService.getTaxCodeForProduct(cartLineItem, productCategories2);
+      }).toThrow(TaxCodeNotFoundError);
 
       // Test multiple categories - finds first with tax code
       const productCategories3 = [
@@ -205,7 +210,7 @@ describe('TaxCodeService', () => {
   });
 
   describe('getCustomTypeCategoryTaxCode', () => {
-    it('should find tax code in categories or parent hierarchy, or return null', () => {
+    it('should find tax code in direct categories only (no parent hierarchy search), or return null', () => {
       // Test empty array
       expect(taxCodeService.getCustomTypeCategoryTaxCode([])).toBeNull();
 
@@ -223,7 +228,7 @@ describe('TaxCodeService', () => {
       ];
       expect(taxCodeService.getCustomTypeCategoryTaxCode(categories1)).toBe('txcd_44444444');
 
-      // Test parent tax code
+      // Test category without tax code (parent hierarchy is NOT searched)
       const categories2 = [
         {
           id: 'category-1',
@@ -240,7 +245,8 @@ describe('TaxCodeService', () => {
           }
         }
       ];
-      expect(taxCodeService.getCustomTypeCategoryTaxCode(categories2)).toBe('txcd_55555555');
+      // Should return null because parent hierarchy is not searched
+      expect(taxCodeService.getCustomTypeCategoryTaxCode(categories2)).toBeNull();
 
       // Test no tax code
       const categories3 = [
@@ -252,7 +258,7 @@ describe('TaxCodeService', () => {
   });
 
   describe('findFirstTaxCodeInHierarchy', () => {
-    it('should find tax code in current or parent category, respect max depth, and prevent duplicates', () => {
+    it('should find tax code in current or parent category, respect max depth, and prevent duplicates (NOTE: This method exists but is not currently used in the main flow)', () => {
       // Test current category
       const category1 = {
         id: 'category-1',
@@ -516,13 +522,13 @@ describe('TaxCodeService', () => {
 
   describe('getShippingTaxCodeFromShippingInfo', () => {
     it('should return tax code from shipping method custom field or null when not found', async () => {
-      const shippingInfo = {
+      // Test with tax code
+      const shippingInfo1 = {
         shippingMethod: {
           id: 'shipping-method-1'
         }
       };
 
-      // Test with tax code
       const mockShippingMethod1 = {
         body: {
           id: 'shipping-method-1',
@@ -534,28 +540,42 @@ describe('TaxCodeService', () => {
         }
       };
       mockShippingMethods.execute.mockResolvedValue(mockShippingMethod1);
-      expect(await taxCodeService.getShippingTaxCodeFromShippingInfo(shippingInfo)).toBe('txcd_shipping_01');
+      expect(await taxCodeService.getShippingTaxCodeFromShippingInfo(shippingInfo1)).toBe('txcd_shipping_01');
 
-      // Test no tax code
+      // Clear cache and test no tax code (use different ID to avoid cache)
+      taxCodeService.clearShippingMethodCache();
+      const shippingInfo2 = {
+        shippingMethod: {
+          id: 'shipping-method-2'
+        }
+      };
+
       const mockShippingMethod2 = {
         body: {
-          id: 'shipping-method-1',
+          id: 'shipping-method-2',
           custom: {
             fields: {}
           }
         }
       };
       mockShippingMethods.execute.mockResolvedValue(mockShippingMethod2);
-      expect(await taxCodeService.getShippingTaxCodeFromShippingInfo(shippingInfo)).toBeNull();
+      expect(await taxCodeService.getShippingTaxCodeFromShippingInfo(shippingInfo2)).toBeNull();
 
-      // Test no custom fields
+      // Clear cache and test no custom fields (use different ID to avoid cache)
+      taxCodeService.clearShippingMethodCache();
+      const shippingInfo3 = {
+        shippingMethod: {
+          id: 'shipping-method-3'
+        }
+      };
+
       const mockShippingMethod3 = {
         body: {
-          id: 'shipping-method-1'
+          id: 'shipping-method-3'
         }
       };
       mockShippingMethods.execute.mockResolvedValue(mockShippingMethod3);
-      expect(await taxCodeService.getShippingTaxCodeFromShippingInfo(shippingInfo)).toBeNull();
+      expect(await taxCodeService.getShippingTaxCodeFromShippingInfo(shippingInfo3)).toBeNull();
     });
   });
 
@@ -565,25 +585,45 @@ describe('TaxCodeService', () => {
       const mockResponse = {
         body: {
           id: 'shipping-method-1',
-          name: 'Standard Shipping'
+          name: 'Standard Shipping',
+          custom: {
+            fields: {
+              [TAX_CODE_CUSTOM_TYPE_NAME]: 'txcd_shipping_01'
+            }
+          }
         }
       };
 
       mockShippingMethods.execute.mockResolvedValue(mockResponse);
       const result = await taxCodeService.getShippingMethodById(shippingMethodId);
+      // The method returns response.body which includes all fields
       expect(result).toEqual(mockResponse.body);
+      expect(result.id).toBe('shipping-method-1');
+      expect(result.name).toBe('Standard Shipping');
       expect(mockShippingMethods.withId).toHaveBeenCalledWith({ ID: shippingMethodId });
 
+      // Test cache - second call should use cache
+      mockShippingMethods.execute.mockClear();
+      const cachedResult = await taxCodeService.getShippingMethodById(shippingMethodId);
+      expect(cachedResult).toEqual(mockResponse.body);
+      expect(mockShippingMethods.execute).not.toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalledWith(
+        'Shipping method retrieved from cache',
+        { shippingMethodId }
+      );
+
       // Test error
+      taxCodeService.clearShippingMethodCache();
+      const errorShippingMethodId = 'shipping-method-error';
       const error = new Error('API Error');
       mockShippingMethods.execute.mockRejectedValue(error);
       await expect(
-        taxCodeService.getShippingMethodById(shippingMethodId)
+        taxCodeService.getShippingMethodById(errorShippingMethodId)
       ).rejects.toThrow('API Error');
       expect(logger.error).toHaveBeenCalledWith(
         'Error fetching shipping method from API',
         expect.objectContaining({
-          shippingMethodId,
+          shippingMethodId: errorShippingMethodId,
           error: 'API Error'
         })
       );
