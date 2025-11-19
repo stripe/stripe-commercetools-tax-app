@@ -477,7 +477,7 @@ class TaxOrchestratorService {
       requests.map((request, index) => {
         logger.debug(`Tax calculation ${index + 1}/${requests.length}`, {
           line_items_count: request.line_items.length,
-          ship_from: request.ship_from_details.address
+          ship_from: request.ship_from_details?.address || null
         });
         
         // Remove shippingKey before sending to Stripe (it's only for internal tracking)
