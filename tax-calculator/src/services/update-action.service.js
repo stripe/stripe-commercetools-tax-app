@@ -76,12 +76,10 @@ class UpdateActionService {
    * NOTE: This combination is ONLY used for custom type metadata.
    * Line items and shipping are processed directly from individual calculations
    * to preserve shippingKey mapping and breakdown precision.
-   * OPTIMIZED: Single pass through calculations array instead of multiple iterations
    * @param {Array} calculations - Array of Stripe calculation responses
    * @returns {Object} Combined calculation object (for custom type only)
    */
   combineCalculations(calculations) {
-    // Single pass optimization: accumulate all values in one iteration
     const allLineItems = [];
     const allTaxBreakdowns = [];
     const allShippingTaxBreakdowns = [];
@@ -314,7 +312,6 @@ class UpdateActionService {
     // CRITICAL: Ensure all line items with setLineItemTotalPrice also have setLineItemTaxAmount
     // This is required because setLineItemTotalPrice changes priceMode to ExternalTotal,
     // and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set
-    // OPTIMIZATION: Build totalPriceActionsByKey and check for missing actions in one pass
     const defaultCountry = cart?.country || cart?.shippingAddress?.country || 'US';
     const defaultCurrency = cart?.totalPrice?.currencyCode || 'USD';
     
@@ -358,7 +355,6 @@ class UpdateActionService {
     }
     
     // Remove temporary _baseAmount field before returning
-    // OPTIMIZATION: Clean up in-place instead of creating new objects
     const finalActions = [];
     for (const action of actionsByKey.values()) {
       delete action._baseAmount;
@@ -442,7 +438,6 @@ class UpdateActionService {
     }
     
     // Remove temporary _quantity field before returning
-    // OPTIMIZATION: Clean up in-place instead of creating new objects
     const finalActions = [];
     for (const action of actionsByKey.values()) {
       delete action._quantity;
@@ -536,7 +531,6 @@ class UpdateActionService {
 
   /**
    * Find the correct tax breakdown for a line item
-   * OPTIMIZED: Precomputes tax rates to avoid repeated calculations
    * @param {Object} lineItemTaxData - Line item tax data
    * @param {Array} taxBreakdowns - Available tax breakdowns
    * @returns {Object|null} Matching tax breakdown or null
@@ -546,7 +540,7 @@ class UpdateActionService {
       return null;
     }
     
-    // OPTIMIZATION: Precompute tax rates and create lookup maps
+    // Precompute tax rates and create lookup maps
     const breakdownsWithRates = taxBreakdowns.map(breakdown => {
       const percentageDecimal = breakdown.tax_rate_details?.percentage_decimal;
       const taxRate = percentageDecimal ? parseFloat(percentageDecimal) / 100 : null;
@@ -949,7 +943,6 @@ class UpdateActionService {
 
   /**
    * Find tax breakdown by direct calculation
-   * OPTIMIZED: Precomputes tax rates to avoid repeated parsing
    * @param {Number} baseAmount - Base amount for the calculation
    * @param {Number} expectedTaxAmount - Expected tax amount
    * @param {Array} taxBreakdowns - Array of tax breakdowns
@@ -959,7 +952,7 @@ class UpdateActionService {
   findByDirectCalculation(baseAmount, expectedTaxAmount, taxBreakdowns, context) {
     if (!taxBreakdowns || taxBreakdowns.length === 0) return null;
     
-    // OPTIMIZATION: Precompute tax rates once
+    // Precompute tax rates once
     const breakdownsWithRates = taxBreakdowns
       .map(breakdown => {
         const percentageDecimal = breakdown.tax_rate_details?.percentage_decimal;

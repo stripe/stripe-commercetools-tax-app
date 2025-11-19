@@ -172,7 +172,6 @@ class CategoryService {
 
   /**
    * Handles queries when there are more than 500 products (commercetools limit)
-   * OPTIMIZED: Limits concurrency to avoid API saturation
    * @private
    */
   async fetchCategoriesInBatches(productIds, options) {
@@ -255,7 +254,6 @@ class CategoryService {
 
   /**
    * Gets categories from cache
-   * OPTIMIZED: Returns partial cache results instead of null when not all products are cached
    * @param {Array<string>} productIds - Array of product IDs to retrieve
    * @param {boolean} staged - Staged flag
    * @param {string} locale - Locale

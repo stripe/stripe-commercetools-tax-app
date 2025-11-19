@@ -84,7 +84,6 @@ class TaxBehaviorService {
 
   /**
    * Get merchant-wide default tax behavior from configuration
-   * OPTIMIZED: Uses cached configuration to avoid repeated I/O
    */
   getMerchantDefaultBehavior() {
     try {
@@ -104,7 +103,6 @@ class TaxBehaviorService {
 
   /**
    * Get country to tax behavior mapping from environment variable
-   * OPTIMIZED: Uses cached parsed JSON to avoid repeated parsing
    */
   getCountryTaxBehaviorMapping() {
     // Check cache first

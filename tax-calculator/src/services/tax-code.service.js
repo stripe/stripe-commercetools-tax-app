@@ -274,7 +274,6 @@ class TaxCodeService {
 
   /**
    * Fetch shipping method from commercetools API by ID
-   * OPTIMIZED: Uses cache to avoid repeated API calls for the same shipping method
    * @param {string} shippingMethodId - Shipping method ID
    * @returns {Promise<Object>} Shipping method object with custom fields
    */

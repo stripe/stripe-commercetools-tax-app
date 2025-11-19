@@ -11,7 +11,6 @@ import { createApiRoot } from '../clients/create.client.js';
  */
 class ShipFromService {
   constructor() {
-    this.addressCache = new Map();
     this.channelCache = new Map();
     this.cacheTTL = 5 * 60 * 1000; // 5 minutes
   }
@@ -237,44 +236,6 @@ class ShipFromService {
     }
     
     return [];
-  }
-
-  /**
-   * Extract customer address from cart for geographic optimization
-   * @param {Object} cart - commercetools cart object
-   * @returns {Object|null} Customer address or null
-   */
-  extractCustomerAddress(cart) {
-    try {
-      let shippingAddress = null;
-      
-      if (cart.shippingMode === 'Single') {
-        shippingAddress = cart.shippingAddress;
-      } else if (cart.shippingMode === 'Multiple' && cart.shipping?.length > 0) {
-        // Use first shipping address for geographic optimization
-        shippingAddress = cart.shipping[0]?.shippingAddress;
-      }
-      
-      if (shippingAddress) {
-        // If shippingAddress has country, use it; otherwise try cart.country as fallback
-        const country = shippingAddress.country || (shippingAddress.postalCode ? cart?.country : null);
-        if (country) {
-          return {
-            country: country,
-            state: shippingAddress.state,
-            city: shippingAddress.city,
-            postalCode: shippingAddress.postalCode
-          };
-        }
-        // If shippingAddress exists but has no country and no postalCode, return null
-        return null;
-      }
-      
-      return null;
-    } catch (error) {
-      logger.warn('Error extracting customer address', { error: error.message });
-      return null;
-    }
   }
 
   /**
