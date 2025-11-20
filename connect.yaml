@@ -15,6 +15,8 @@ deployAs:
           description: JSON string (with escaped double quotes) mapping country codes to their default tax behavior
         - key: TAX_CODE_MAPPING_JSON
           description: JSON string (with escaped double quotes) mapping commercetools categories to Stripe tax codes
+        - key: SHIP_FROM_REQUIRED
+          description: Whether to require a ship from address for tax calculations (true or false)
         - key: DEFAULT_BUSINESS_COUNTRY
           description: Default country (ship from address) for tax calculations
         - key: DEFAULT_BUSINESS_STATE
@@ -27,8 +29,6 @@ deployAs:
           description: Default line 1 (ship from address) for tax calculations
         - key: DEFAULT_BUSINESS_LINE2
           description: Default line 2 (ship from address) for tax calculations
-        - key: SHIP_FROM_REQUIRED
-          description: Whether to require a ship from address for tax calculations
         - key: CHANNEL_PRIORITY
           description: Comma-separated channel IDs for priority-based selection
       securedConfiguration:
