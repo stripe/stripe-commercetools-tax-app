@@ -31,6 +31,12 @@ deployAs:
           description: Default line 2 (ship from address) for tax calculations
         - key: CHANNEL_PRIORITY
           description: Comma-separated channel IDs for priority-based selection
+        - key: ADDRESS_VALIDATION_RATE_LIMIT
+          description: Rate limit for address validation in requests per minute
+        - key: ADDRESS_VALIDATION_WINDOW_MINUTES
+          description: Time window in minutes for address validation rate limit
+        - key: ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY
+          description: Default currency for Stripe verification
       securedConfiguration:
         - key: CTP_PROJECT_KEY
           description: project key from commercetools composable commerce project
