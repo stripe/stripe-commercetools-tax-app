@@ -60,26 +60,50 @@ class CategoryService {
     });
 
     // Check cache if enabled
+    let categoriesMap = new Map();
+    let productIdsToFetch = uniqueProductIds;
+    
     if (useCache) {
       const cachedResult = this.getFromCache(uniqueProductIds, staged, locale);
       if (cachedResult) {
-        logger.debug('Categories retrieved from cache', {
-          productsCount: cachedResult.size
-        });
-        return cachedResult;
+        // Check if we have partial cache
+        if (cachedResult.size === uniqueProductIds.length) {
+          // Full cache hit
+          logger.debug('Categories retrieved from cache (full hit)', {
+            productsCount: cachedResult.size
+          });
+          return cachedResult;
+        } else if (cachedResult.size > 0) {
+          // Partial cache hit - use what we have and fetch only missing products
+          logger.debug('Categories retrieved from cache (partial hit)', {
+            cachedCount: cachedResult.size,
+            totalCount: uniqueProductIds.length,
+            missingCount: uniqueProductIds.length - cachedResult.size
+          });
+          categoriesMap = cachedResult;
+          // Only fetch products not in cache
+          productIdsToFetch = uniqueProductIds.filter(id => !cachedResult.has(id));
+        }
       }
     }
 
     try {
-      // Get categories from API
-      const categoriesMap = await this.fetchCategoriesFromAPI(uniqueProductIds, {
-        staged,
-        locale
-      });
-
-      // Save to cache
-      if (useCache) {
-        this.saveToCache(categoriesMap, staged, locale);
+      // Fetch only missing products from API
+      if (productIdsToFetch.length > 0) {
+        const fetchedCategories = await this.fetchCategoriesFromAPI(productIdsToFetch, {
+          staged,
+          locale
+        });
+        
+        // Merge fetched results with cached results
+        fetchedCategories.forEach((categories, productId) => {
+          categoriesMap.set(productId, categories);
+        });
+        
+        // Save to cache (update existing cache entry)
+        if (useCache) {
+          this.saveToCache(categoriesMap, staged, locale);
+        }
       }
 
       return categoriesMap;
@@ -114,9 +138,6 @@ class CategoryService {
       staged: staged,
       expand: [
         'categories[*]',
-        'categories[*].custom',
-        'categories[*].parent',
-        'categories[*].parent.custom'
       ],
       limit: 500
     };
@@ -125,7 +146,6 @@ class CategoryService {
       queryArgs.locale = locale;
     }
 
-    // Execute query
     const response = await createApiRoot()
       .productProjections()
       .get({ queryArgs })
@@ -139,12 +159,6 @@ class CategoryService {
     productProjections.forEach(projection => {
       const categories = this.extractCategories(projection);
       categoriesMap.set(projection.id, categories);
-      
-      logger.debug('Categories extracted for product', {
-        productId: projection.id,
-        categoriesCount: categories.length,
-        hasCustomFields: categories.some(cat => cat.custom?.fields)
-      });
     });
 
     logger.info('Categories fetched from API', {
@@ -162,6 +176,7 @@ class CategoryService {
    */
   async fetchCategoriesInBatches(productIds, options) {
     const BATCH_SIZE = 500;
+    const MAX_CONCURRENT_BATCHES = 5; // Limit concurrent API calls
     const batches = [];
     
     for (let i = 0; i < productIds.length; i += BATCH_SIZE) {
@@ -171,15 +186,21 @@ class CategoryService {
     logger.info('Splitting into batches due to commercetools limit', {
       totalProducts: productIds.length,
       batchCount: batches.length,
-      batchSize: BATCH_SIZE
+      batchSize: BATCH_SIZE,
+      maxConcurrency: MAX_CONCURRENT_BATCHES
     });
 
-    // Execute all batches in parallel
-    const batchPromises = batches.map(batch => 
-      this.fetchCategoriesFromAPI(batch, options)
-    );
-
-    const batchResults = await Promise.allSettled(batchPromises);
+    // Execute batches with concurrency limit
+    const batchResults = [];
+    for (let i = 0; i < batches.length; i += MAX_CONCURRENT_BATCHES) {
+      const batchGroup = batches.slice(i, i + MAX_CONCURRENT_BATCHES);
+      const batchPromises = batchGroup.map(batch => 
+        this.fetchCategoriesFromAPI(batch, options)
+      );
+      
+      const groupResults = await Promise.allSettled(batchPromises);
+      batchResults.push(...groupResults);
+    }
 
     // Combine results
     const combinedMap = new Map();
@@ -218,22 +239,25 @@ class CategoryService {
     }
 
     return productProjection.categories
+      .filter(Boolean)
       .map(catRef => {
-        // If the category is expanded (has obj), return the full object
         if (catRef.obj) {
           return catRef.obj;
         }
-        // If not expanded, return only the basic reference
+
         return {
           id: catRef.id,
           typeId: catRef.typeId
         };
-      })
-      .filter(Boolean); // Filter null/undefined
+      });
   }
 
   /**
    * Gets categories from cache
+   * @param {Array<string>} productIds - Array of product IDs to retrieve
+   * @param {boolean} staged - Staged flag
+   * @param {string} locale - Locale
+   * @returns {Map|null} Map of cached categories (may be partial) or null if cache expired/empty
    */
   getFromCache(productIds, staged, locale) {
     const cacheKey = this.getCacheKey(staged, locale);
@@ -257,12 +281,9 @@ class CategoryService {
       }
     });
 
-    // If we don't have all the products in cache, return null
-    if (result.size < productIds.length) {
-      return null;
-    }
-
-    return result;
+    // Return partial cache if we have at least some products cached
+    // This allows incremental fetching instead of discarding partial cache
+    return result.size > 0 ? result : null;
   }
 
   /**

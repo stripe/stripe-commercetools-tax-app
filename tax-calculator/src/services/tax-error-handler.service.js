@@ -4,6 +4,7 @@ import { HTTP_STATUS_BAD_REQUEST, HTTP_STATUS_SERVER_ERROR } from '../constants/
 import TaxCodeNotFoundError from '../errors/taxCodeNotFound.error.js';
 import TaxCodeShippingNotFoundError from '../errors/taxCodeShippingNotFound.error.js';
 import MissingTaxRateForCountry from '../errors/missingTaxRateForCountry.error.js';
+import ShipFromNotFoundError from '../errors/shipFromNotFoundError.js';
 
 /**
  * Error handler specifically for tax calculation errors
@@ -19,6 +20,11 @@ class TaxErrorHandlerService {
    * @returns {Object|null} Response object if handled, null if not handled
    */
   static handleTaxCalculationError(error, request, response, cartRequestBody) {
+    // Handle ship-from not found errors
+    if (error instanceof ShipFromNotFoundError) {
+      return this.handleShipFromNotFoundError(error, response);
+    }
+
     // Handle tax code not found errors
     if (error instanceof TaxCodeNotFoundError) {
       return this.handleTaxCodeNotFoundError(error, response);
@@ -36,6 +42,21 @@ class TaxErrorHandlerService {
 
     // Handle other errors
     return this.handleOtherErrors(error, response);
+  }
+
+  /**
+   * Handle ShipFromNotFoundError
+   * @param {ShipFromNotFoundError} error 
+   * @param {Object} response 
+   * @returns {Object}
+   */
+  static handleShipFromNotFoundError(error, response) {
+    logger.error('Ship-from address not found', {
+      cartId: error.cart?.id
+    });
+    return response.status(HTTP_STATUS_BAD_REQUEST).json({
+      errors: [error.toCommercetoolsError()]
+    });
   }
 
   /**

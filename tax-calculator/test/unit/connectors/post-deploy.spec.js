@@ -1,280 +1,224 @@
-import { expect, describe, it, jest, beforeEach, afterEach } from '@jest/globals';
+// tax-calculator/test/unit/controllers/tax-calculator.controller.spec.js
+import { expect, describe, it, jest, beforeEach } from '@jest/globals';
+import { HTTP_STATUS_BAD_REQUEST, HTTP_STATUS_SUCCESS_ACCEPTED } from '../../../src/constants/http.status.constants.js';
+import { taxHandler } from '../../../src/controllers/tax.calculator.controller.js';
+import CustomError from '../../../src/errors/custom.error.js';
 
-// Mock the dependencies
-jest.mock('../../../src/clients/create.client.js', () => ({
-  createApiRoot: jest.fn()
+// Mock dependencies
+jest.mock('../../../src/utils/logger.utils.js', () => ({
+  logger: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn()
+  }
 }));
 
-jest.mock('../../../src/connectors/action.js', () => ({
-  createCTPExtension: jest.fn(),
-  createCustomTypes: jest.fn()
+jest.mock('../../../src/services/tax-orchestrator.service.js', () => ({
+  default: {
+    orchestrateTaxCalculation: jest.fn()
+  }
 }));
 
-jest.mock('../../../src/validators/stripeTaxValidator.js', () => ({
-  validateStripeTax: jest.fn()
+jest.mock('../../../src/services/tax-error-handler.service.js', () => ({
+  default: {
+    handleTaxCalculationError: jest.fn()
+  }
 }));
 
-import { createApiRoot } from '../../../src/clients/create.client.js';
-import { createCTPExtension } from '../../../src/connectors/action.js';
-import { validateStripeTax } from '../../../src/validators/stripeTaxValidator.js';
-import {
-  CONNECT_SERVICE_URL,
-  CTP_TAX_CALCULATOR_EXTENSION_KEY,
-  TAX_PROVIDER_API_TOKEN,
-} from '../../../src/connectors/constants.js';
+jest.mock('lodash', () => ({
+  isEmpty: jest.fn()
+}));
 
-// Import the module under test
-import { postDeploy, run } from '../../../src/connectors/post-deploy.js';
+import { logger } from '../../../src/utils/logger.utils.js';
+import taxOrchestratorService from '../../../src/services/tax-orchestrator.service.js';
+import TaxErrorHandlerService from '../../../src/services/tax-error-handler.service.js';
+import _ from 'lodash';
 
-describe('post-deploy.spec', () => {
-  let mockApiRoot;
-  let originalProcessEnv;
-  let originalExitCode;
+describe('tax-calculator.controller', () => {
+  let mockRequest;
+  let mockResponse;
 
   beforeEach(() => {
-    // Store original values
-    originalProcessEnv = process.env;
-    originalExitCode = process.exitCode;
-
-    // Reset all mocks
     jest.clearAllMocks();
 
-    // Setup mock API root
-    mockApiRoot = { mock: 'apiRoot' };
-    createApiRoot.mockReturnValue(mockApiRoot);
+    taxOrchestratorService.orchestrateTaxCalculation = jest.fn();
+    TaxErrorHandlerService.handleTaxCalculationError = jest.fn();
 
-    // Reset process.exitCode
-    process.exitCode = 0;
+    mockRequest = {
+      body: {
+        resource: {
+          obj: {
+            id: 'cart-1',
+            shippingMode: 'Single',
+            lineItems: [
+              {
+                id: 'line-item-1',
+                productId: 'product-1',
+                totalPrice: {
+                  centAmount: 5000
+                }
+              }
+            ]
+          }
+        }
+      }
+    };
+
+    mockResponse = {
+      status: jest.fn().mockReturnThis(),
+      send: jest.fn().mockReturnThis(),
+      json: jest.fn().mockReturnThis()
+    };
+
+    _.isEmpty.mockReturnValue(false);
   });
 
-  afterEach(() => {
-    // Restore original values
-    process.env = originalProcessEnv;
-    process.exitCode = originalExitCode;
-  });
+  describe('taxHandler', () => {
+    it('should return 400 when request body is invalid (missing, empty, null, or undefined)', async () => {
+      const invalidBodies = [
+        {},
+        { resource: {} },
+        { resource: { obj: {} } },
+        null,
+        undefined
+      ];
 
-  describe('postDeploy function', () => {
-    it('should execute successfully with valid properties', async () => {
-      // Arrange
-      const properties = new Map([
-        [CONNECT_SERVICE_URL, 'https://example.com'],
-        [TAX_PROVIDER_API_TOKEN, 'sk_test_token']
-      ]);
+      for (const invalidBody of invalidBodies) {
+        mockRequest.body = invalidBody;
+        _.isEmpty.mockReturnValue(invalidBody === null || invalidBody === undefined || 
+          (typeof invalidBody === 'object' && Object.keys(invalidBody).length === 0));
 
-      validateStripeTax.mockResolvedValue();
-      createCTPExtension.mockResolvedValue();
+        await taxHandler(mockRequest, mockResponse);
 
-      // Act
-      await postDeploy(properties);
+        expect(mockResponse.status).toHaveBeenCalledWith(HTTP_STATUS_BAD_REQUEST);
+        expect(mockResponse.send).toHaveBeenCalledWith(expect.any(CustomError));
+      }
+    });
 
-      // Assert
-      expect(validateStripeTax).toHaveBeenCalledWith('sk_test_token');
-      expect(createApiRoot).toHaveBeenCalled();
-      expect(createCTPExtension).toHaveBeenCalledWith(
-        mockApiRoot,
-        CTP_TAX_CALCULATOR_EXTENSION_KEY,
-        'https://example.com'
+    it('should successfully process tax calculation and log request information', async () => {
+      const mockResult = {
+        actions: [
+          { action: 'setCustomType' },
+          { action: 'setLineItemTaxAmount', lineItemId: 'line-item-1' }
+        ]
+      };
+
+      taxOrchestratorService.orchestrateTaxCalculation.mockResolvedValue(mockResult);
+      _.isEmpty.mockReturnValue(false);
+
+      await taxHandler(mockRequest, mockResponse);
+
+      expect(taxOrchestratorService.orchestrateTaxCalculation).toHaveBeenCalledWith(
+        mockRequest.body.resource.obj
       );
+      expect(mockResponse.status).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_ACCEPTED);
+      expect(mockResponse.send).toHaveBeenCalledWith(mockResult);
+      expect(logger.info).toHaveBeenCalledWith('Tax calculation completed successfully');
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('request body:'));
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Cart request body:'));
     });
 
-    it('should throw error when TAX_PROVIDER_API_TOKEN is missing', async () => {
-      // Arrange
-      const properties = new Map([
-        [CONNECT_SERVICE_URL, 'https://example.com']
-        // TAX_PROVIDER_API_TOKEN is missing
-      ]);
+    it('should handle errors and delegate to error handler', async () => {
+      const error = new Error('Tax calculation failed');
+      taxOrchestratorService.orchestrateTaxCalculation.mockRejectedValue(error);
+      _.isEmpty.mockReturnValue(false);
 
-      // Act & Assert
-      await expect(postDeploy(properties))
-        .rejects
-        .toThrow(`${TAX_PROVIDER_API_TOKEN} is required for Stripe Tax validation`);
+      const mockErrorResponse = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn().mockReturnThis(),
+        json: jest.fn().mockReturnThis()
+      };
+      TaxErrorHandlerService.handleTaxCalculationError.mockReturnValue(mockErrorResponse);
 
-      expect(validateStripeTax).not.toHaveBeenCalled();
-      expect(createCTPExtension).not.toHaveBeenCalled();
-    });
+      const result = await taxHandler(mockRequest, mockResponse);
 
-    it('should throw error when CONNECT_SERVICE_URL is missing', async () => {
-      // Arrange
-      const properties = new Map([
-        [TAX_PROVIDER_API_TOKEN, 'sk_test_token']
-        // CONNECT_SERVICE_URL is missing
-      ]);
-
-      // Act & Assert
-      await expect(postDeploy(properties))
-        .rejects
-        .toThrow(`${CONNECT_SERVICE_URL} is required for extension creation`);
-
-      expect(validateStripeTax).not.toHaveBeenCalled();
-      expect(createCTPExtension).not.toHaveBeenCalled();
-    });
-
-    it('should throw error when both required properties are missing', async () => {
-      // Arrange
-      const properties = new Map([]);
-
-      // Act & Assert
-      await expect(postDeploy(properties))
-        .rejects
-        .toThrow(`${TAX_PROVIDER_API_TOKEN} is required for Stripe Tax validation`);
-
-      expect(validateStripeTax).not.toHaveBeenCalled();
-      expect(createCTPExtension).not.toHaveBeenCalled();
-    });
-
-    it('should throw error when Stripe Tax validation fails', async () => {
-      // Arrange
-      const properties = new Map([
-        [CONNECT_SERVICE_URL, 'https://example.com'],
-        [TAX_PROVIDER_API_TOKEN, 'sk_test_token']
-      ]);
-
-      const validationError = new Error('Stripe Tax validation failed');
-      validateStripeTax.mockRejectedValue(validationError);
-
-      // Act & Assert
-      await expect(postDeploy(properties))
-        .rejects
-        .toThrow('Stripe Tax validation failed');
-
-      expect(validateStripeTax).toHaveBeenCalledWith('sk_test_token');
-      expect(createCTPExtension).not.toHaveBeenCalled();
-    });
-
-    it('should throw error when CTP extension creation fails', async () => {
-      // Arrange
-      const properties = new Map([
-        [CONNECT_SERVICE_URL, 'https://example.com'],
-        [TAX_PROVIDER_API_TOKEN, 'sk_test_token']
-      ]);
-
-      validateStripeTax.mockResolvedValue();
-      const extensionError = new Error('Extension creation failed');
-      createCTPExtension.mockRejectedValue(extensionError);
-
-      // Act & Assert
-      await expect(postDeploy(properties))
-        .rejects
-        .toThrow('Extension creation failed');
-
-      expect(validateStripeTax).toHaveBeenCalledWith('sk_test_token');
-      expect(createApiRoot).toHaveBeenCalled();
-      expect(createCTPExtension).toHaveBeenCalledWith(
-        mockApiRoot,
-        CTP_TAX_CALCULATOR_EXTENSION_KEY,
-        'https://example.com'
+      expect(TaxErrorHandlerService.handleTaxCalculationError).toHaveBeenCalledWith(
+        error,
+        mockRequest,
+        mockResponse,
+        mockRequest.body.resource.obj
       );
+      expect(result).toBe(mockErrorResponse);
     });
 
-    it('should handle empty string values for required properties', async () => {
-      // Arrange
-      const properties = new Map([
-        [CONNECT_SERVICE_URL, ''],
-        [TAX_PROVIDER_API_TOKEN, '']
-      ]);
+    it('should handle different cart configurations (Single/Multiple mode, with/without line items)', async () => {
+      const cartConfigurations = [
+        {
+          id: 'cart-1',
+          shippingMode: 'Multiple',
+          shipping: [
+            {
+              shippingKey: 'shipping-key-1',
+              shippingInfo: { price: { centAmount: 1000 } }
+            }
+          ],
+          lineItems: [
+            {
+              id: 'line-item-1',
+              productId: 'product-1',
+              totalPrice: { centAmount: 5000 }
+            }
+          ]
+        },
+        {
+          id: 'cart-2',
+          shippingMode: 'Single',
+          lineItems: []
+        },
+        {
+          id: 'cart-3',
+          shippingMode: 'Single'
+        },
+        {
+          id: 'cart-4',
+          customerId: 'customer-1',
+          anonymousId: 'anon-1',
+          country: 'US',
+          locale: 'en-US',
+          shippingMode: 'Single',
+          shippingAddress: {
+            state: 'NY',
+            city: 'New York',
+            postalCode: '10001',
+            streetName: '123 Main St'
+          },
+          shippingInfo: {
+            price: { centAmount: 1000 },
+            shippingMethod: { id: 'method-1' }
+          },
+          totalPrice: { currencyCode: 'USD' },
+          lineItems: [
+            {
+              id: 'line-item-1',
+              productId: 'product-1',
+              quantity: 2,
+              totalPrice: { centAmount: 2000 },
+              categories: []
+            },
+            {
+              id: 'line-item-2',
+              productId: 'product-2',
+              quantity: 1,
+              totalPrice: { centAmount: 3000 },
+              categories: []
+            }
+          ]
+        }
+      ];
 
-      // Act & Assert
-      await expect(postDeploy(properties))
-        .rejects
-        .toThrow(`${TAX_PROVIDER_API_TOKEN} is required for Stripe Tax validation`);
+      for (const cartConfig of cartConfigurations) {
+        mockRequest.body.resource.obj = cartConfig;
+        const mockResult = { actions: [] };
+        
+        taxOrchestratorService.orchestrateTaxCalculation.mockResolvedValue(mockResult);
+        _.isEmpty.mockReturnValue(false);
 
-      expect(validateStripeTax).not.toHaveBeenCalled();
-      expect(createCTPExtension).not.toHaveBeenCalled();
-    });
+        await taxHandler(mockRequest, mockResponse);
 
-    it('should handle null values for required properties', async () => {
-      // Arrange
-      const properties = new Map([
-        [CONNECT_SERVICE_URL, null],
-        [TAX_PROVIDER_API_TOKEN, null]
-      ]);
-
-      // Act & Assert
-      await expect(postDeploy(properties))
-        .rejects
-        .toThrow(`${TAX_PROVIDER_API_TOKEN} is required for Stripe Tax validation`);
-
-      expect(validateStripeTax).not.toHaveBeenCalled();
-      expect(createCTPExtension).not.toHaveBeenCalled();
-    });
-
-    it('should handle undefined values for required properties', async () => {
-      // Arrange
-      const properties = new Map([
-        [CONNECT_SERVICE_URL, undefined],
-        [TAX_PROVIDER_API_TOKEN, undefined]
-      ]);
-
-      // Act & Assert
-      await expect(postDeploy(properties))
-        .rejects
-        .toThrow(`${TAX_PROVIDER_API_TOKEN} is required for Stripe Tax validation`);
-
-      expect(validateStripeTax).not.toHaveBeenCalled();
-      expect(createCTPExtension).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('run function', () => {
-    it('should execute successfully and not set exit code when postDeploy succeeds', async () => {
-      // Arrange
-      process.env = {
-        [CONNECT_SERVICE_URL]: 'https://example.com',
-        [TAX_PROVIDER_API_TOKEN]: 'sk_test_token'
-      };
-
-      validateStripeTax.mockResolvedValue();
-      createCTPExtension.mockResolvedValue();
-
-      // Act
-      await run();
-
-      // Assert
-      expect(validateStripeTax).toHaveBeenCalledWith('sk_test_token');
-      expect(createCTPExtension).toHaveBeenCalled();
-      expect(process.exitCode).toBe(0);
-    });
-
-    it('should set exit code to 1 when postDeploy fails', async () => {
-      // Arrange
-      process.env = {
-        [CONNECT_SERVICE_URL]: 'https://example.com',
-        [TAX_PROVIDER_API_TOKEN]: 'sk_test_token'
-      };
-
-      const error = new Error('Test error');
-      validateStripeTax.mockRejectedValue(error);
-
-      // Act
-      await run();
-
-      // Assert
-      expect(process.exitCode).toBe(1);
-    });
-
-    it('should handle missing environment variables in run function', async () => {
-      // Arrange
-      process.env = {};
-
-      // Act
-      await run();
-
-      // Assert
-      expect(process.exitCode).toBe(1);
-    });
-
-    it('should handle partial environment variables in run function', async () => {
-      // Arrange
-      process.env = {
-        [CONNECT_SERVICE_URL]: 'https://example.com'
-        // TAX_PROVIDER_API_TOKEN is missing
-      };
-
-      // Act
-      await run();
-
-      // Assert
-      expect(process.exitCode).toBe(1);
+        expect(taxOrchestratorService.orchestrateTaxCalculation).toHaveBeenCalledWith(cartConfig);
+        expect(mockResponse.status).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_ACCEPTED);
+      }
     });
   });
 });

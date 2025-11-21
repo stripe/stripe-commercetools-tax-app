@@ -1,14 +1,8 @@
 import _ from 'lodash';
 import { serializeError } from 'serialize-error';
 import { logger } from '../utils/logger.utils.js';
-import extensionTemplate from "./../../resources/api-extension.json" with { type: 'json' };
-import {
-  TAX_CODE_CUSTOM_TYPE_NAME,
-  PRODUCT_TAX_CUSTOM_TYPE,
-  CATEGORY_TAX_CUSTOM_TYPE,
-  SHIPPING_TAX_CUSTOM_TYPE,
-  CART_TAX_CUSTOM_TYPE,
-} from './customTypes.js';
+import extensionTemplate from "./../../resources/api-extension.json" assert { type: 'json' };
+import { ALL_CUSTOM_TYPES, TAX_CODE_CUSTOM_TYPE_NAME } from './customTypes.js';
 
 export async function createCTPExtension(
   apiRoot,
@@ -109,17 +103,18 @@ export async function deleteCTPExtension(
   apiRoot,
   ctpTaxCalculatorExtensionKey
 ) {
-  const existingExtension = await fetchExtensionByKey(
+  const response = await fetchExtensionByKey(
     apiRoot,
     ctpTaxCalculatorExtensionKey
   );
-  if (existingExtension !== null) {
+  const existingExtension = response?.results;
+  if (existingExtension?.length) {
     await apiRoot
-      .extension()
+      .extensions()
       .withKey({ key: ctpTaxCalculatorExtensionKey })
       .delete({
         queryArgs: {
-          version: existingExtension.version,
+          version: existingExtension[0].version,
         },
       })
       .execute();
@@ -228,14 +223,7 @@ export async function validateTaxCodeMapping(apiRoot, mapping) {
 export async function createCustomTypes(apiRoot) {
   logger.info('Creating custom types for Stripe Tax connector...');
 
-  const customTypes = [
-    PRODUCT_TAX_CUSTOM_TYPE,
-    CATEGORY_TAX_CUSTOM_TYPE,
-    SHIPPING_TAX_CUSTOM_TYPE,
-    CART_TAX_CUSTOM_TYPE
-  ];
-
-  for (const customType of customTypes) {
+  for (const customType of ALL_CUSTOM_TYPES) {
     try {
       await addOrUpdateCustomType(apiRoot, customType);
       logger.info(`Custom type '${customType.key}' or field definitions related with Stripe Tax Connector have been created successfully`);
@@ -262,7 +250,7 @@ async function addOrUpdateCustomType(apiRoot, customType) {
     const updates = (customType.fieldDefinitions ?? [])
       .filter(
         (newFieldDefinition) =>
-          !!type.fieldDefinitions?.find(
+          !type.fieldDefinitions?.find(
             (existingFieldDefinition) =>
               newFieldDefinition.name === existingFieldDefinition.name
           )
@@ -338,14 +326,7 @@ export async function deleteCustomTypes(apiRoot, cleanupCustomTypes = false) {
 
   logger.info('Cleaning up custom types...');
 
-  const customTypes = [
-    PRODUCT_TAX_CUSTOM_TYPE,
-    CATEGORY_TAX_CUSTOM_TYPE,
-    SHIPPING_TAX_CUSTOM_TYPE,
-    CART_TAX_CUSTOM_TYPE
-  ];
-
-  for (const customType of customTypes) {
+  for (const customType of ALL_CUSTOM_TYPES) {
     try {
       await deleteOrUpdateCustomType(apiRoot, customType);
       logger.info(`Field definitions or custom type '${customType.key}' related with Stripe Tax Connector have been removed successfully`);
@@ -422,15 +403,8 @@ export async function validateCustomTypes(apiRoot) {
     errors: []
   };
 
-  const customTypes = [
-    PRODUCT_TAX_CUSTOM_TYPE,
-    CATEGORY_TAX_CUSTOM_TYPE,
-    SHIPPING_TAX_CUSTOM_TYPE,
-    CART_TAX_CUSTOM_TYPE
-  ];
-
   try {
-    for (const customTypeDefinition of customTypes) {
+    for (const customTypeDefinition of ALL_CUSTOM_TYPES) {
       const typeValidation = {
         key: customTypeDefinition.key,
         exists: false,

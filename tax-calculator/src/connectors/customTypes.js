@@ -9,11 +9,11 @@
 export const TAX_CODE_CUSTOM_TYPE_NAME = 'connectorStripeTax_TaxCode';
 
 export const CART_TAX_FIELD_NAMES = {
-  CALCULATION_REFERENCE: 'connectorStripeTax_calculationReference',
+  CALCULATION_REFERENCES: 'connectorStripeTax_calculationReferences',
   AMOUNT_TOTAL: 'connectorStripeTax_amountTotal',
   TAX_AMOUNT_EXCLUSIVE: 'connectorStripeTax_taxAmountExclusive',
   TAX_AMOUNT_INCLUSIVE: 'connectorStripeTax_taxAmountInclusive',
-  CURRENCY: 'connectorStripeTax_currency',
+  CURRENCIES: 'connectorStripeTax_currencies',
   EXPIRES_AT: 'connectorStripeTax_expiresAt',
   CALCULATION_TIMESTAMP: 'connectorStripeTax_calculationTimestamp'
 };
@@ -113,12 +113,15 @@ export const CART_TAX_CUSTOM_TYPE = {
   "resourceTypeIds": ["order"],
   "fieldDefinitions": [
     {
-      "name": CART_TAX_FIELD_NAMES.CALCULATION_REFERENCE,
+      "name": CART_TAX_FIELD_NAMES.CALCULATION_REFERENCES,
       "label": {
-        "en": "Stripe Tax Calculation Reference"
+        "en": "Stripe Tax Calculation References"
       },
       "type": {
-        "name": "String"
+        "name": "Set",
+        "elementType": {
+          "name": "String"
+        }
       },
       "required": false,
       "inputHint": "SingleLine"
@@ -157,12 +160,15 @@ export const CART_TAX_CUSTOM_TYPE = {
       "inputHint": "SingleLine"
     },
     {
-      "name": CART_TAX_FIELD_NAMES.CURRENCY,
+      "name": CART_TAX_FIELD_NAMES.CURRENCIES,
       "label": {
-        "en": "Currency Code"
+        "en": "Currencies Codes"
       },
       "type": {
-        "name": "String"
+        "name": "Set",
+        "elementType": {
+          "name": "String"
+        }
       },
       "required": false,
       "inputHint": "SingleLine"
@@ -173,7 +179,10 @@ export const CART_TAX_CUSTOM_TYPE = {
         "en": "Tax Calculation Expires At (ISO 8601)"
       },
       "type": {
-        "name": "String"
+        "name": "Set",
+        "elementType": {
+          "name": "String"
+        }
       },
       "required": false,
       "inputHint": "SingleLine"
@@ -191,3 +200,10 @@ export const CART_TAX_CUSTOM_TYPE = {
     }
   ]
 }
+
+export const ALL_CUSTOM_TYPES = [	
+  PRODUCT_TAX_CUSTOM_TYPE,
+  CATEGORY_TAX_CUSTOM_TYPE,
+  SHIPPING_TAX_CUSTOM_TYPE,
+  CART_TAX_CUSTOM_TYPE
+];

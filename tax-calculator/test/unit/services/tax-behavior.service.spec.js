@@ -1,14 +1,16 @@
 import { expect, describe, it, jest, beforeEach } from '@jest/globals';
-import { taxBehaviorService } from '../../src/services/tax-behavior.service.js';
-import configUtils from '../../src/utils/config.util.js';
-import { TAX_BEHAVIOR_INCLUSIVE, TAX_BEHAVIOR_EXCLUSIVE } from '../../src/constants/tax-behavior.constants.js';
+import { taxBehaviorService } from '../../../src/services/tax-behavior.service.js';
+import configUtils from '../../../src/utils/config.util.js';
+import { TAX_BEHAVIOR_INCLUSIVE, TAX_BEHAVIOR_EXCLUSIVE } from '../../../src/constants/tax-behavior.constants.js';
 
 // Mock the config utils
-jest.mock('../../src/utils/config.util.js');
+jest.mock('../../../src/utils/config.util.js');
 
 describe('TaxBehaviorService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Clear service cache before each test to avoid interference
+    taxBehaviorService.clearCache();
   });
 
   describe('determineTaxBehaviorForCart', () => {
@@ -66,7 +68,9 @@ describe('TaxBehaviorService', () => {
     it('should return merchant default when no country mapping', () => {
       const cartContext = { country: 'US' };
       
+      // Explicitly set empty country mapping to ensure no country-based behavior
       configUtils.readConfiguration.mockReturnValue({
+        countryTaxBehaviorMapping: '{}', // Empty mapping
         taxBehaviorDefault: TAX_BEHAVIOR_EXCLUSIVE
       });
 
@@ -141,6 +145,9 @@ describe('TaxBehaviorService', () => {
 
     it('should handle invalid JSON in country mapping', () => {
       const cartContext = { country: 'DE' };
+      
+      // Clear cache first to ensure fresh parsing
+      taxBehaviorService.clearCache();
       
       configUtils.readConfiguration.mockReturnValue({
         countryTaxBehaviorMapping: 'invalid-json'
