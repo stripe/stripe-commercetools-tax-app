@@ -126,3 +126,238 @@ JSON object mapping country codes to their default tax behavior. This allows dif
 ```bash
 COUNTRY_TAX_BEHAVIOR_MAPPING='{"US":"exclusive","DE":"inclusive","FR":"inclusive"}'
 ```
+
+## Available Endpoints
+
+The tax calculator module provides the following REST API endpoints:
+
+### POST /taxCalculator
+Main endpoint for tax calculation. Triggered automatically by commercetools API Extension when a cart is created or updated.
+
+**Request:**
+- Triggered by commercetools API Extension
+- Receives cart object in request body (frozen state, ExternalAmount tax mode)
+
+**Response:**
+- Returns commercetools update actions for applying calculated taxes to the cart
+- Status: `202 Accepted` on success
+- Status: `400 Bad Request` on validation errors
+- Status: `500 Internal Server Error` on system errors
+
+**Example Response:**
+```json
+{
+  "actions": [
+    {
+      "action": "setCustomType",
+      "type": { "key": "stripe-tax", "typeId": "type" },
+      "fields": { ... }
+    },
+    {
+      "action": "setLineItemTaxAmount",
+      "lineItemId": "line-item-id",
+      "externalTaxAmount": { ... }
+    }
+  ]
+}
+```
+
+### POST /validateAddress
+Endpoint for address validation. Validates shipping addresses using local business rules and Stripe Tax API verification.
+
+**Request Body:**
+```json
+{
+  "address": {
+    "line1": "123 Main St",
+    "city": "San Francisco",
+    "state": "CA",
+    "postal_code": "94105",
+    "country": "US"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "validation": {
+    "local": {
+      "isValid": true,
+      "errors": []
+    },
+    "stripe": {
+      "accepted": true
+    }
+  },
+  "address": {
+    "suggestions": []
+  }
+}
+```
+
+**Rate Limiting:**
+- Configurable via `ADDRESS_VALIDATION_RATE_LIMIT` (default: 100 requests/minute)
+- Time window configurable via `ADDRESS_VALIDATION_WINDOW_MINUTES` (default: 1 minute)
+
+**Status Codes:**
+- `200 OK`: Validation completed (check `success` field for result)
+- `429 Too Many Requests`: Rate limit exceeded
+- `400 Bad Request`: Invalid request format
+
+## Services Overview
+
+The tax calculator module is built using a service-oriented architecture with the following core services:
+
+### Tax Orchestrator Service
+**Purpose**: Main orchestration service that coordinates the complete tax calculation flow.
+
+**Responsibilities:**
+- Coordinates all other services in the correct sequence
+- Determines tax behavior for the cart
+- Retrieves product categories
+- Groups line items by ship-from address
+- Creates Stripe tax calculation requests
+- Executes calculations in parallel (for multiple shipping methods)
+- Transforms results into commercetools update actions
+
+**Key Methods:**
+- `orchestrateTaxCalculation(cart)` - Main orchestration method
+
+### Tax Behavior Service
+**Purpose**: Determines whether taxes should be calculated as inclusive or exclusive.
+
+**Responsibilities:**
+- Determines tax behavior at cart level (applied to all line items)
+- Implements priority-based fallback logic:
+  1. Country-specific mapping (highest priority)
+  2. Merchant-wide default
+  3. Stripe default (lowest priority)
+- Caches configuration to optimize performance
+
+**Key Methods:**
+- `determineTaxBehaviorForCart(cartRequest)` - Determines behavior for all line items
+- `determineCartTaxBehavior(cartContext)` - Determines behavior for cart
+
+### Category Service
+**Purpose**: Retrieves product categories from commercetools API with intelligent caching.
+
+**Responsibilities:**
+- Fetches expanded categories with custom types from commercetools
+- Implements in-memory caching (5-minute TTL)
+- Supports partial cache hits (only fetches missing products)
+- Handles large product sets through batch processing (>500 products)
+- Executes batches concurrently for optimal performance
+
+**Key Methods:**
+- `getCategoriesForProducts(productIds, options)` - Retrieves categories for multiple products
+
+### Tax Code Service
+**Purpose**: Resolves Stripe tax codes for products based on category configuration.
+
+**Responsibilities:**
+- Checks category custom type fields for tax codes
+- Supports custom type-based tax code assignment
+- Caches shipping method data to avoid repeated API calls
+- Throws clear errors when tax codes are not found
+
+**Key Methods:**
+- `getTaxCodeForProduct(cartLineItem, productCategories)` - Resolves tax code for a product
+- `getShippingTaxCodeFromShippingInfo(shippingInfo)` - Resolves tax code for shipping
+
+### Ship-From Service
+**Purpose**: Resolves ship-from addresses for line items using multiple fallback strategies.
+
+**Responsibilities:**
+- Resolves ship-from addresses from line item supply channels
+- Falls back to inventory entry supply channels (dropshipping)
+- Uses default business address as final fallback
+- Groups line items by ship-from address for separate tax calculations
+- Caches channel data to optimize performance
+
+**Key Methods:**
+- `resolveAllShipFromAddresses(lineItems)` - Resolves addresses for all line items
+- `resolveShipFromForLineItem(lineItem)` - Resolves address for a single line item
+
+### Address Service
+**Purpose**: Validates shipping addresses using two-tier validation (local + Stripe).
+
+**Responsibilities:**
+- Validates address structure and format
+- Performs country-specific validation (postal codes, state codes, required fields)
+- Verifies addresses with Stripe Tax API
+- Generates user-friendly error messages and suggestions
+- Provides actionable guidance for address corrections
+
+**Key Methods:**
+- `validateAddress(address, requestId)` - Main validation method
+
+### Update Action Service
+**Purpose**: Transforms Stripe tax calculation results into commercetools update actions.
+
+**Responsibilities:**
+- Combines multiple calculations (for multiple shipping methods)
+- Creates cart custom type update actions
+- Creates line item tax update actions
+- Creates shipping tax update actions
+- Creates cart total tax action (for ExternalAmount mode)
+- Handles shipping key separation for multiple shipping modes
+
+**Key Methods:**
+- `createCartUpdateActionsFromMultipleCalculations(calculations, shippingInfoGroups, requests, cart)` - Main transformation method
+
+### Tax Error Handler Service
+**Purpose**: Handles tax calculation errors and converts them to commercetools-compatible format.
+
+**Responsibilities:**
+- Handles tax code not found errors
+- Handles ship-from not found errors
+- Handles Stripe API errors
+- Maps Stripe error codes to user-friendly messages
+- Returns commercetools-compatible error format
+
+**Key Methods:**
+- `handleTaxCalculationError(error, request, response, cartRequestBody)` - Main error handler
+
+## Environment Variables
+
+The tax calculator module supports the following environment variables. All variables listed in `connect.yaml` are available for configuration:
+
+### Required Variables
+
+#### commercetools Configuration
+- **CTP_PROJECT_KEY**: commercetools project key
+- **CTP_CLIENT_ID**: commercetools API client ID
+- **CTP_CLIENT_SECRET**: commercetools API client secret
+- **CTP_SCOPE**: commercetools API client scope
+- **CTP_REGION**: commercetools project region
+
+#### Stripe Tax Configuration
+- **TAX_PROVIDER_API_TOKEN**: Stripe API secret key for Stripe Tax
+
+### Optional Variables
+
+#### Tax Behavior Configuration
+- **TAX_BEHAVIOR_DEFAULT**: Default tax behavior (`inclusive` or `exclusive`)
+- **COUNTRY_TAX_BEHAVIOR_MAPPING**: JSON string mapping countries to tax behaviors
+
+#### Tax Code Configuration
+- **TAX_CODE_MAPPING_JSON**: JSON string mapping commercetools categories to Stripe tax codes
+
+#### Ship-From Address Configuration
+- **SHIP_FROM_REQUIRED**: Require ship-from address (`true` or `false`, default: `false`)
+- **DEFAULT_BUSINESS_COUNTRY**: Default business country
+- **DEFAULT_BUSINESS_STATE**: Default business state/province
+- **DEFAULT_BUSINESS_CITY**: Default business city
+- **DEFAULT_BUSINESS_POSTAL_CODE**: Default business postal code
+- **DEFAULT_BUSINESS_LINE1**: Default business street address line 1
+- **DEFAULT_BUSINESS_LINE2**: Default business street address line 2
+- **CHANNEL_PRIORITY**: Comma-separated channel IDs for priority-based selection
+
+#### Address Validation Configuration
+- **ADDRESS_VALIDATION_RATE_LIMIT**: Rate limit for address validation (requests per minute, default: `100`)
+- **ADDRESS_VALIDATION_WINDOW_MINUTES**: Time window for rate limit (minutes, default: `1`)
+- **ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY**: Default currency for Stripe verification (default: `usd`)
+
+For complete configuration details, see [connect.yaml](../connect.yaml) in the root directory.
