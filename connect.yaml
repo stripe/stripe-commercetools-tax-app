@@ -7,8 +7,12 @@ deployAs:
       preUndeploy: npm install && npm run connector:pre-undeploy
     configuration:
       standardConfiguration:
+        - key: CTP_PROJECT_KEY
+          description: project key from commercetools composable commerce project
+          required: true
         - key: CTP_REGION
           description: region of commercetools composable commerce project
+          required: true
         - key: TAX_BEHAVIOR_DEFAULT
           description: Sets the default tax behavior for all tax calculations when no other rules apply
         - key: COUNTRY_TAX_BEHAVIOR_MAPPING
@@ -38,34 +42,15 @@ deployAs:
         - key: ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY
           description: Default currency for Stripe verification
       securedConfiguration:
-        - key: CTP_PROJECT_KEY
-          description: project key from commercetools composable commerce project
         - key: CTP_CLIENT_ID
           description: client id from commercetools composable commerce project
+          required: true
         - key: CTP_CLIENT_SECRET
           description: client secret from commercetools composable commerce project
+          required: true
         - key: CTP_SCOPE
           description: scope from commercetools composable commerce project
+          required: true
         - key: TAX_PROVIDER_API_TOKEN
           description: API Token for communication between the connector and tax provider
-  - name: order-syncer
-    applicationType: event
-    endpoint: /orderSyncer
-    scripts:
-      postDeploy: npm install && npm run connector:post-deploy
-      preUndeploy: npm install && npm run connector:pre-undeploy
-    configuration:
-      standardConfiguration:
-        - key: CTP_REGION
-          description: region of commercetools composable commerce project
-      securedConfiguration:
-        - key: CTP_PROJECT_KEY
-          description: project key from commercetools composable commerce project
-        - key: CTP_CLIENT_ID
-          description: client id from commercetools composable commerce project
-        - key: CTP_CLIENT_SECRET
-          description: client secret from commercetools composable commerce project
-        - key: CTP_SCOPE
-          description: scope from commercetools composable commerce project
-        - key: TAX_PROVIDER_API_TOKEN
-          description: API Token for communication between the connector and tax provider
+          required: true
