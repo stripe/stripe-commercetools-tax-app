@@ -36,66 +36,30 @@ export async function createCTPExtension(
     );
     const existingExtension = response?.results;
     if (existingExtension?.length) {
-      const updateActions = buildUpdateActions(existingExtension[0], extensionDraft);
-      if (updateActions.length > 0) {
-        await apiRoot
-            .extensions()
-            .withId({ ID: existingExtension[0].id })
-            .post({
-              body: {
-                actions: updateActions,
-                version: existingExtension[0].version,
-              },
-            })
-            .execute();
-        logger.info(
-            'Successfully updated the API extension for payment resource type ' +
-            `key=${ctpTaxCalculatorExtensionKey}`
-        );
-      } else {
-        logger.info('No update actions found to update CTP Extension ' +
-            `key=${ctpTaxCalculatorExtensionKey}` );
-      }
-    } else {
-      await apiRoot.extensions().post({ body: extensionDraft}).execute();
+      await apiRoot
+        .extensions()
+        .withKey({ key: ctpTaxCalculatorExtensionKey })
+        .delete({
+          queryArgs: {
+            version: existingExtension[0].version,
+          },
+        })
+        .execute();
       logger.info(
-          'Successfully created an API extension for payment resource type ' +
-          `key=${ctpTaxCalculatorExtensionKey}`
+        `Deleted existing API extension with key=${ctpTaxCalculatorExtensionKey} before creating new one`
       );
-    }
+    } 
+    await apiRoot.extensions().post({ body: extensionDraft}).execute();
+    logger.info(
+      'Successfully created an API extension for tax calculation ' +
+      `key=${ctpTaxCalculatorExtensionKey}`
+    );
   } catch (err) {
     throw Error(
       `Failed to sync API extension (key=${ctpTaxCalculatorExtensionKey}). ` +
         `Error: ${JSON.stringify(serializeError(err))}`
     );
   }
-}
-
-/**
- * Build update actions for extension changes
- * @param {Object} existingExtension - Current extension configuration
- * @param {Object} extensionDraft - New extension configuration
- * @returns {Array} Array of update actions
- */
-function buildUpdateActions(existingExtension, extensionDraft) {
-  const actions = [];
-
-  const existingDest = existingExtension.destination;
-  const draftDest = extensionDraft.destination;
-
-  if (existingDest?.type !== draftDest?.type || existingDest?.url !== draftDest?.url)
-    actions.push({
-      action: 'changeDestination',
-      destination: extensionDraft.destination,
-    });
-
-  if (!areTriggersEqual(existingExtension.triggers, extensionDraft.triggers))
-    actions.push({
-      action: 'changeTriggers',
-      triggers: extensionDraft.triggers,
-    });
-
-  return actions;
 }
 
 /**
@@ -119,56 +83,6 @@ async function fetchExtensionByKey(apiRoot, key) {
     if (err.statusCode === 404) return null;
     throw err;
   }
-}
-
-/**
- * Compare triggers for equality
- * @param {Array} existing - Existing triggers array
- * @param {Array} draft - Draft triggers array
- * @returns {boolean} True if triggers are equal, false otherwise
- */
-function areTriggersEqual(existing, draft) {
-  const existingArray = Array.isArray(existing) ? existing : [];
-  const draftArray = Array.isArray(draft) ? draft : [];
-  
-  if (existingArray.length !== draftArray.length) {
-    return false;
-  }
-  
-  // Normalize all triggers for independent order comparison
-  const normalizeTrigger = (trigger) => {
-    return {
-      resourceTypeId: trigger?.resourceTypeId,
-      actions: [...(trigger?.actions || [])].sort(),
-      condition: trigger?.condition?.trim() || undefined
-    };
-  };
-  
-  const normalizedExisting = existingArray.map(normalizeTrigger);
-  const normalizedDraft = draftArray.map(normalizeTrigger);
-  
-  // Sort by resourceTypeId for consistent comparison
-  normalizedExisting.sort((a, b) => {
-    if (a.resourceTypeId !== b.resourceTypeId) {
-      return (a.resourceTypeId || '').localeCompare(b.resourceTypeId || '');
-    }
-    // Same resourceTypeId, sort by condition
-    const condA = a.condition || '';
-    const condB = b.condition || '';
-    return condA.localeCompare(condB);
-  });
-  
-  normalizedDraft.sort((a, b) => {
-    if (a.resourceTypeId !== b.resourceTypeId) {
-      return (a.resourceTypeId || '').localeCompare(b.resourceTypeId || '');
-    }
-    const condA = a.condition || '';
-    const condB = b.condition || '';
-    return condA.localeCompare(condB);
-  });
-  
-  // Compare normalized and sorted arrays
-  return _.isEqual(normalizedExisting, normalizedDraft);
 }
 
 /**
