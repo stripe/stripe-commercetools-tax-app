@@ -1,9 +1,15 @@
 import _ from 'lodash';
 import { serializeError } from 'serialize-error';
 import { logger } from '../utils/logger.utils.js';
-import extensionTemplate from "./../../resources/api-extension.json" assert { type: 'json' };
+import extensionTemplate from './../../resources/api-extension.json' assert { type: 'json' };
 import { ALL_CUSTOM_TYPES, TAX_CODE_CUSTOM_TYPE_NAME } from './customTypes.js';
 
+/**
+ * Create or update a commercetools API extension for tax calculation
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} ctpTaxCalculatorExtensionKey - Extension key identifier
+ * @param {string} ctpExtensionBaseUrl - Base URL for the extension endpoint
+ */
 export async function createCTPExtension(
   apiRoot,
   ctpTaxCalculatorExtensionKey,
@@ -65,15 +71,25 @@ export async function createCTPExtension(
   }
 }
 
+/**
+ * Build update actions for extension changes
+ * @param {Object} existingExtension - Current extension configuration
+ * @param {Object} extensionDraft - New extension configuration
+ * @returns {Array} Array of update actions
+ */
 function buildUpdateActions(existingExtension, extensionDraft) {
   const actions = [];
-  if (!_.isEqual(existingExtension.destination, extensionDraft.destination))
+
+  const existingDest = existingExtension.destination;
+  const draftDest = extensionDraft.destination;
+
+  if (existingDest?.type !== draftDest?.type || existingDest?.url !== draftDest?.url)
     actions.push({
       action: 'changeDestination',
       destination: extensionDraft.destination,
     });
 
-  if (!_.isEqual(existingExtension.triggers, extensionDraft.triggers))
+  if (!areTriggersEqual(existingExtension.triggers, extensionDraft.triggers))
     actions.push({
       action: 'changeTriggers',
       triggers: extensionDraft.triggers,
@@ -82,6 +98,12 @@ function buildUpdateActions(existingExtension, extensionDraft) {
   return actions;
 }
 
+/**
+ * Fetch extension by key from commercetools
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} key - Extension key
+ * @returns {Promise<Object|null>} Extension body or null if not found
+ */
 async function fetchExtensionByKey(apiRoot, key) {
   try {
     const { body } = await apiRoot
@@ -99,6 +121,61 @@ async function fetchExtensionByKey(apiRoot, key) {
   }
 }
 
+/**
+ * Compare triggers for equality
+ * @param {Array} existing - Existing triggers array
+ * @param {Array} draft - Draft triggers array
+ * @returns {boolean} True if triggers are equal, false otherwise
+ */
+function areTriggersEqual(existing, draft) {
+  const existingArray = Array.isArray(existing) ? existing : [];
+  const draftArray = Array.isArray(draft) ? draft : [];
+  
+  if (existingArray.length !== draftArray.length) {
+    return false;
+  }
+  
+  // Normalize all triggers for independent order comparison
+  const normalizeTrigger = (trigger) => {
+    return {
+      resourceTypeId: trigger?.resourceTypeId,
+      actions: [...(trigger?.actions || [])].sort(),
+      condition: trigger?.condition?.trim() || undefined
+    };
+  };
+  
+  const normalizedExisting = existingArray.map(normalizeTrigger);
+  const normalizedDraft = draftArray.map(normalizeTrigger);
+  
+  // Sort by resourceTypeId for consistent comparison
+  normalizedExisting.sort((a, b) => {
+    if (a.resourceTypeId !== b.resourceTypeId) {
+      return (a.resourceTypeId || '').localeCompare(b.resourceTypeId || '');
+    }
+    // Same resourceTypeId, sort by condition
+    const condA = a.condition || '';
+    const condB = b.condition || '';
+    return condA.localeCompare(condB);
+  });
+  
+  normalizedDraft.sort((a, b) => {
+    if (a.resourceTypeId !== b.resourceTypeId) {
+      return (a.resourceTypeId || '').localeCompare(b.resourceTypeId || '');
+    }
+    const condA = a.condition || '';
+    const condB = b.condition || '';
+    return condA.localeCompare(condB);
+  });
+  
+  // Compare normalized and sorted arrays
+  return _.isEqual(normalizedExisting, normalizedDraft);
+}
+
+/**
+ * Delete a commercetools API extension by key
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} ctpTaxCalculatorExtensionKey - Extension key identifier
+ */
 export async function deleteCTPExtension(
   apiRoot,
   ctpTaxCalculatorExtensionKey
