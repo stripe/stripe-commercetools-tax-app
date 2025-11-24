@@ -18,7 +18,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // Define routes
 // TODO: Give a specific route name
-app.use('/', SyncRoutes);
+app.use('/orderSyncer', SyncRoutes);
 
 // Listen the application
 const server = app.listen(PORT, () => {

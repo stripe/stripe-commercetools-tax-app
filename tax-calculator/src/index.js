@@ -7,7 +7,7 @@ import bodyParser from 'body-parser';
 import taxCalculatorRouter from './routes/tax.calculator.route.js';
 import addressValidationRouter from './routes/address.validation.route.js';
 import { logger } from './utils/logger.utils.js';
-const PORT = 8081;
+const PORT = 8080;
 
 // Create the express app
 const app = express();
@@ -17,8 +17,8 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // Define routes
-app.use('/', taxCalculatorRouter);
-app.use('/', addressValidationRouter);
+app.use('/taxCalculator', taxCalculatorRouter);
+app.use('/taxCalculator', addressValidationRouter);
 
 // Listen the application
 const server = app.listen(PORT, () => {
