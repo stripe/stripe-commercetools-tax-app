@@ -1,6 +1,5 @@
 import { serializeError } from 'serialize-error';
 import { logger } from '../utils/logger.utils.js';
-import extensionTemplate from './../../resources/api-extension.json' assert { type: 'json' };
 import { ALL_CUSTOM_TYPES, TAX_CODE_CUSTOM_TYPE_NAME } from './customTypes.js';
 
 /**
@@ -22,12 +21,19 @@ export async function createCTPExtension(
     logger.info(`Connect tax-integration deployment service url: ${ctpExtensionBaseUrl}`);
 
     const extensionDraft = {
-      ...extensionTemplate,
       key: ctpTaxCalculatorExtensionKey,
       destination: {
-        ...extensionTemplate.destination,
-        url: ctpExtensionBaseUrl
-      }
+        type: 'HTTP',
+        url: ctpExtensionBaseUrl,
+      },
+      triggers: [
+        {
+          resourceTypeId: 'cart',
+          actions: ['Update', 'Create'],
+          condition: 'taxMode="ExternalAmount" AND lineItems is defined AND lineItems is not empty AND (shippingInfo is defined OR lineItems(shippingDetails is defined)) AND (taxMode has changed OR lineItems has changed OR shippingInfo has changed OR shippingAddress has changed OR shipping has changed OR itemShippingAddresses has changed)',
+        },
+      ],
+      timeoutInMs: 2000,
     };
 
     const response = await fetchExtensionByKey(
