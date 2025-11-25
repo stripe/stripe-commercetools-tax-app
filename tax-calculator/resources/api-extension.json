@@ -1,8 +1,6 @@
 {
-  "key": "${ctpTaxCalculatorExtensionKey}",
   "destination": {
-    "type": "HTTP",
-    "url": "${ctpExtensionBaseUrl}"
+    "type": "HTTP"
   },
   "triggers": [
     {
