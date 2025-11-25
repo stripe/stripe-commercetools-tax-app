@@ -36,7 +36,8 @@ export async function postDeploy(properties) {
   logger.info('Validating Stripe Tax configuration...');
   await validateStripeTax(stripeApiToken);
 
-  logger.info('Creating commercetools extension...');  const taxCodeMappingJson = properties.get(TAX_CODE_MAPPING_JSON_KEY);
+  logger.info('Creating commercetools extension...');  
+  const taxCodeMappingJson = properties.get(TAX_CODE_MAPPING_JSON_KEY);
 
   const apiRoot = createApiRoot();
 

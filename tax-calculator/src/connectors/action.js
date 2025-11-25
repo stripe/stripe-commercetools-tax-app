@@ -1,7 +1,7 @@
-import _ from 'lodash';
+//import _ from 'lodash';
 import { serializeError } from 'serialize-error';
 import { logger } from '../utils/logger.utils.js';
-import extensionTemplate from './../../resources/api-extension.json' assert { type: 'json' };
+//import extensionTemplate from './../../resources/api-extension.json' assert { type: 'json' };
 import { ALL_CUSTOM_TYPES, TAX_CODE_CUSTOM_TYPE_NAME } from './customTypes.js';
 
 /**
@@ -21,14 +21,30 @@ export async function createCTPExtension(
     // values (ctpTaxCalculatorExtensionKey and ctpExtensionBaseUrl). The result is a string with the placeholders
     // replaced, which is then parsed back into a JavaScript object using JSON.parse.
     // This allows dynamic insertion of runtime values into a static JSON template.
-    const extensionDraft = JSON.parse(
-      _.template(JSON.stringify(extensionTemplate))({
-        ctpTaxCalculatorExtensionKey,
-        ctpExtensionBaseUrl,
-      })
-    );
 
-    logger.info(`Connect tax-integration deployment service url: ${ctpExtensionBaseUrl} `)
+    if (!ctpExtensionBaseUrl) {
+      throw new Error('ctpExtensionBaseUrl is required for extension creation');
+    }
+
+    logger.info(`Connect tax-integration deployment service url: ${ctpExtensionBaseUrl}`);
+
+    const extensionDraft = {
+      key: ctpTaxCalculatorExtensionKey,
+      destination: {
+        type: 'HTTP',
+        url: ctpExtensionBaseUrl,
+      },
+      triggers: [
+        {
+          resourceTypeId: 'cart',
+          actions: ['Update', 'Create'],
+          condition: 'taxMode="ExternalAmount" AND lineItems is defined AND lineItems is not empty AND (shippingInfo is defined OR lineItems(shippingDetails is defined)) AND (taxMode has changed OR lineItems has changed OR shippingInfo has changed OR shippingAddress has changed OR shipping has changed OR itemShippingAddresses has changed)',
+        },
+      ],
+      timeoutInMs: 2000,
+    };
+
+    //logger.info(`Connect tax-integration deployment service url: ${ctpExtensionBaseUrl} `)
 
     const response = await fetchExtensionByKey(
       apiRoot,
