@@ -1,28 +1,40 @@
-import _ from 'lodash';
 import { serializeError } from 'serialize-error';
 import { logger } from '../utils/logger.utils.js';
-import extensionTemplate from "./../../resources/api-extension.json" assert { type: 'json' };
 import { ALL_CUSTOM_TYPES, TAX_CODE_CUSTOM_TYPE_NAME } from './customTypes.js';
 
+/**
+ * Create or update a commercetools API extension for tax calculation
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} ctpTaxCalculatorExtensionKey - Extension key identifier
+ * @param {string} ctpExtensionBaseUrl - Base URL for the extension endpoint
+ */
 export async function createCTPExtension(
   apiRoot,
   ctpTaxCalculatorExtensionKey,
   ctpExtensionBaseUrl
 ) {
   try {
-    // This code creates an "extensionDraft" object by first converting the imported JSON template (extensionTemplate)
-    // into a string, then using lodash's template function to replace placeholders in the string with the provided
-    // values (ctpTaxCalculatorExtensionKey and ctpExtensionBaseUrl). The result is a string with the placeholders
-    // replaced, which is then parsed back into a JavaScript object using JSON.parse.
-    // This allows dynamic insertion of runtime values into a static JSON template.
-    const extensionDraft = JSON.parse(
-      _.template(JSON.stringify(extensionTemplate))({
-        ctpTaxCalculatorExtensionKey,
-        ctpExtensionBaseUrl,
-      })
-    );
+    if (!ctpExtensionBaseUrl) {
+      throw new Error('ctpExtensionBaseUrl is required for extension creation');
+    }
 
-    logger.info(`Connect tax-integration deployment service url: ${ctpExtensionBaseUrl} `)
+    logger.info(`Connect tax-integration deployment service url: ${ctpExtensionBaseUrl}`);
+
+    const extensionDraft = {
+      key: ctpTaxCalculatorExtensionKey,
+      destination: {
+        type: 'HTTP',
+        url: ctpExtensionBaseUrl,
+      },
+      triggers: [
+        {
+          resourceTypeId: 'cart',
+          actions: ['Update', 'Create'],
+          condition: 'taxMode="ExternalAmount" AND lineItems is defined AND lineItems is not empty AND (shippingInfo is defined OR lineItems(shippingDetails is defined)) AND (taxMode has changed OR lineItems has changed OR shippingInfo has changed OR shippingAddress has changed OR shipping has changed OR itemShippingAddresses has changed)',
+        },
+      ],
+      timeoutInMs: 2000,
+    };
 
     const response = await fetchExtensionByKey(
       apiRoot,
@@ -30,33 +42,24 @@ export async function createCTPExtension(
     );
     const existingExtension = response?.results;
     if (existingExtension?.length) {
-      const updateActions = buildUpdateActions(existingExtension[0], extensionDraft);
-      if (updateActions.length > 0) {
-        await apiRoot
-            .extensions()
-            .withId({ ID: existingExtension[0].id })
-            .post({
-              body: {
-                actions: updateActions,
-                version: existingExtension[0].version,
-              },
-            })
-            .execute();
-        logger.info(
-            'Successfully updated the API extension for payment resource type ' +
-            `key=${ctpTaxCalculatorExtensionKey}`
-        );
-      } else {
-        logger.info('No update actions found to update CTP Extension ' +
-            `key=${ctpTaxCalculatorExtensionKey}` );
-      }
-    } else {
-      await apiRoot.extensions().post({ body: extensionDraft}).execute();
+      await apiRoot
+        .extensions()
+        .withKey({ key: ctpTaxCalculatorExtensionKey })
+        .delete({
+          queryArgs: {
+            version: existingExtension[0].version,
+          },
+        })
+        .execute();
       logger.info(
-          'Successfully created an API extension for payment resource type ' +
-          `key=${ctpTaxCalculatorExtensionKey}`
+        `Deleted existing API extension with key=${ctpTaxCalculatorExtensionKey} before creating new one`
       );
-    }
+    } 
+    await apiRoot.extensions().post({ body: extensionDraft}).execute();
+    logger.info(
+      'Successfully created an API extension for tax calculation ' +
+      `key=${ctpTaxCalculatorExtensionKey}`
+    );
   } catch (err) {
     throw Error(
       `Failed to sync API extension (key=${ctpTaxCalculatorExtensionKey}). ` +
@@ -65,23 +68,12 @@ export async function createCTPExtension(
   }
 }
 
-function buildUpdateActions(existingExtension, extensionDraft) {
-  const actions = [];
-  if (!_.isEqual(existingExtension.destination, extensionDraft.destination))
-    actions.push({
-      action: 'changeDestination',
-      destination: extensionDraft.destination,
-    });
-
-  if (!_.isEqual(existingExtension.triggers, extensionDraft.triggers))
-    actions.push({
-      action: 'changeTriggers',
-      triggers: extensionDraft.triggers,
-    });
-
-  return actions;
-}
-
+/**
+ * Fetch extension by key from commercetools
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} key - Extension key
+ * @returns {Promise<Object|null>} Extension body or null if not found
+ */
 async function fetchExtensionByKey(apiRoot, key) {
   try {
     const { body } = await apiRoot
@@ -99,6 +91,11 @@ async function fetchExtensionByKey(apiRoot, key) {
   }
 }
 
+/**
+ * Delete a commercetools API extension by key
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} ctpTaxCalculatorExtensionKey - Extension key identifier
+ */
 export async function deleteCTPExtension(
   apiRoot,
   ctpTaxCalculatorExtensionKey

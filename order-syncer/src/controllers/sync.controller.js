@@ -11,27 +11,14 @@ import {
 import createTaxTransaction from '../extensions/stripe/clients/client.js';
 import CustomError from '../errors/custom.error.js';
 
-async function syncToTaxProvider(orderId, cart) {
-  const createTaxTxnResponse = await createTaxTransaction(orderId, cart).catch(
-    (error) => {
-      throw new CustomError(
-        HTTP_STATUS_SUCCESS_ACCEPTED,
-        `Error from extension : ${error.message}`,
-        error
-      );
-    }
-  );
-
-  const taxTxnId = createTaxTxnResponse.id;
-  logger.info(
-    `Tax transaction ID from Stripe of order ${orderId} : ${taxTxnId}`
-  );
-
-  if (taxTxnId) {
-    await updateOrderTaxTxn(taxTxnId, orderId);
-  }
-}
-
+/**
+ * Sync handler for the Order Syncer
+ * This function is called when a new order is created
+ * 
+ * @param {Object} request - The request object
+ * @param {Object} response - The response object
+ * @returns {Promise<Object>} The response object
+ */
 export const syncHandler = async (request, response) => {
   try {
     // Receive the Pub/Sub message
@@ -50,7 +37,7 @@ export const syncHandler = async (request, response) => {
     const orderId = messageBody?.resource?.id;
     const cart = await getCartByOrderId(orderId);
     if (cart) {
-      await syncToTaxProvider(orderId, cart);
+      await syncOrderToTaxProvider(orderId, cart);
     }
   } catch (err) {
     logger.error(err);
@@ -62,34 +49,30 @@ export const syncHandler = async (request, response) => {
   return response.status(HTTP_STATUS_SUCCESS_NO_CONTENT).send();
 };
 
-
-export const syncRawHandler = async (request, response) => {
-  try {
-    // Receive the Pub/Sub message
-    logger.info(`Received Pub/Sub syncRawHandler message: ${JSON.stringify(request.body,null,2)}`);
-    const encodedMessageBody = request.body?.message?.data;
-    if (!encodedMessageBody) {
+/**
+ * Sync to the tax provider
+ * This function is called to sync the order to the tax provider
+ * 
+ * @param {string} orderId - The order ID
+ * @param {Object} cart - The cart object
+ * @returns {Promise<void>} The response object
+ */
+async function syncOrderToTaxProvider(orderId, cart) {
+  const taxTransactions = await createTaxTransaction(orderId, cart).catch(
+    (error) => {
       throw new CustomError(
         HTTP_STATUS_SUCCESS_ACCEPTED,
-        'Missing message data from incoming event message.'
+        `Error from extension : ${error.message}`,
+        error
       );
     }
+  );
 
-    const messageBody = decodeToJson(encodedMessageBody);
-    logger.info(`Decoded message body: ${JSON.stringify(messageBody,null,2)}`);
-    doValidation(messageBody);
+  logger.info(
+    `Tax transactions from Stripe of order ${orderId} : ${taxTransactions.map(txn => txn.id).join(', ')}`
+  );
 
-    const orderId = messageBody?.resource?.id;
-    const cart = await getCartByOrderId(orderId);
-    if (cart) {
-      await syncToTaxProvider(orderId, cart);
-    }
-  } catch (err) {
-    logger.error(err);
-    if (err.statusCode) return response.status(err.statusCode).send(err);
-    return response.status(HTTP_STATUS_SERVER_ERROR).send(err);
+  if (taxTransactions.length > 0) {
+    await updateOrderTaxTxn(taxTransactions, orderId);
   }
-
-  // Return the response for the client
-  return response.status(HTTP_STATUS_SUCCESS_NO_CONTENT).send();
-};
+}

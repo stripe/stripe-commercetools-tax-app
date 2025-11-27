@@ -7,16 +7,22 @@ deployAs:
       preUndeploy: npm install && npm run connector:pre-undeploy
     configuration:
       standardConfiguration:
+        - key: CTP_PROJECT_KEY
+          description: project key from commercetools composable commerce project
+          required: true
         - key: CTP_REGION
           description: region of commercetools composable commerce project
+          required: true
         - key: TAX_BEHAVIOR_DEFAULT
           description: Sets the default tax behavior for all tax calculations when no other rules apply
+          default: 'exclusive'
         - key: COUNTRY_TAX_BEHAVIOR_MAPPING
           description: JSON string (with escaped double quotes) mapping country codes to their default tax behavior
         - key: TAX_CODE_MAPPING_JSON
           description: JSON string (with escaped double quotes) mapping commercetools categories to Stripe tax codes
         - key: SHIP_FROM_REQUIRED
           description: Whether to require a ship from address for tax calculations (true or false)
+          default: 'true'
         - key: DEFAULT_BUSINESS_COUNTRY
           description: Default country (ship from address) for tax calculations
         - key: DEFAULT_BUSINESS_STATE
@@ -33,21 +39,25 @@ deployAs:
           description: Comma-separated channel IDs for priority-based selection
         - key: ADDRESS_VALIDATION_RATE_LIMIT
           description: Rate limit for address validation in requests per minute
+          default: '100'
         - key: ADDRESS_VALIDATION_WINDOW_MINUTES
           description: Time window in minutes for address validation rate limit
+          default: '1'
         - key: ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY
           description: Default currency for Stripe verification
       securedConfiguration:
-        - key: CTP_PROJECT_KEY
-          description: project key from commercetools composable commerce project
         - key: CTP_CLIENT_ID
           description: client id from commercetools composable commerce project
+          required: true
         - key: CTP_CLIENT_SECRET
           description: client secret from commercetools composable commerce project
+          required: true
         - key: CTP_SCOPE
           description: scope from commercetools composable commerce project
+          required: true
         - key: TAX_PROVIDER_API_TOKEN
           description: API Token for communication between the connector and tax provider
+          required: true
   - name: order-syncer
     applicationType: event
     endpoint: /orderSyncer
@@ -56,16 +66,22 @@ deployAs:
       preUndeploy: npm install && npm run connector:pre-undeploy
     configuration:
       standardConfiguration:
-        - key: CTP_REGION
-          description: region of commercetools composable commerce project
-      securedConfiguration:
         - key: CTP_PROJECT_KEY
           description: project key from commercetools composable commerce project
+          required: true
+        - key: CTP_REGION
+          description: region of commercetools composable commerce project
+          required: true
+      securedConfiguration:
         - key: CTP_CLIENT_ID
           description: client id from commercetools composable commerce project
+          required: true
         - key: CTP_CLIENT_SECRET
           description: client secret from commercetools composable commerce project
+          required: true
         - key: CTP_SCOPE
           description: scope from commercetools composable commerce project
+          required: true
         - key: TAX_PROVIDER_API_TOKEN
           description: API Token for communication between the connector and tax provider
+          required: true

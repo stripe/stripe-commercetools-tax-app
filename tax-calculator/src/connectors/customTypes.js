@@ -102,6 +102,10 @@ export const SHIPPING_TAX_CUSTOM_TYPE = {
   ],
 };
 
+/**
+ * Custom type for Cart tax calculation reference
+ * Allows merchants to set tax calculation reference for cart and order
+ */
 export const CART_TAX_CUSTOM_TYPE = {
   "key": "connector-stripe-tax-calculation-reference",
   "name": {

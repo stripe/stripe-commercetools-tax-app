@@ -1,61 +1,52 @@
+import { logger } from '../utils/logger.util.js'
 import { MESSAGE_TYPE } from '../constants/connectors.constants.js';
+import { ORDER_TAX_CUSTOM_TYPE } from './customTypes.js';
 
-export async function createType(apiRoot, ctpTaxTypeKey) {
-  const body = {
-    key: `${ctpTaxTypeKey}`,
-    name: {
-      en: 'Tax transaction',
-    },
-    description: {
-      en: 'Additional field to store tax result from Stripe',
-    },
-    resourceTypeIds: ['order'],
-    fieldDefinitions: [
-      {
-        name: 'taxCalculationReference',
-        label: {
-          en: 'Tax Calculation Reference',
-        },
-        required: false,
-        type: {
-          name: 'String',
-        },
-        inputHint: 'SingleLine',
-      },
-      {
-        name: 'taxTransactionReference',
-        label: {
-          en: 'Tax Transaction Reference',
-        },
-        required: false,
-        type: {
-          name: 'String',
-        },
-        inputHint: 'SingleLine',
-      },
-    ],
-  };
+/**
+ * Create a changed order subscription
+ * This function is called during post-deploy to create a subscription to the Pub/Sub topic
+ * 
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} topicName - The name of the Pub/Sub topic
+ * @param {string} projectId - The ID of the project
+ * @param {string} ctpOrderChangeSubscriptionKey - The key of the subscription
+ */
+export async function createChangedOrderSubscription(
+  apiRoot,
+  topicName,
+  projectId,
+  ctpOrderChangeSubscriptionKey
+) {
+  await deleteChangedOrderSubscription(apiRoot, ctpOrderChangeSubscriptionKey);
 
-  const {
-    body: { results: types },
-  } = await apiRoot
-    .types()
-    .get({
-      queryArgs: {
-        where: `key = "${ctpTaxTypeKey}"`,
+  await apiRoot
+    .subscriptions()
+    .post({
+      body: {
+        key: ctpOrderChangeSubscriptionKey,
+        destination: {
+          type: 'GoogleCloudPubSub',
+          topic: topicName,
+          projectId,
+        },
+        messages: [
+          {
+            resourceTypeId: 'order',
+            types: MESSAGE_TYPE,
+          },
+        ],
       },
     })
     .execute();
-  if (types && types.length === 0) {
-    await apiRoot
-      .types()
-      .post({
-        body,
-      })
-      .execute();
-  }
 }
 
+/**
+ * Delete a changed order subscription
+ * This function is called during pre-undeploy to delete the subscription to the Pub/Sub topic
+ * 
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} ctpOrderChangeSubscriptionKey - The key of the subscription
+ */
 export async function deleteChangedOrderSubscription(
   apiRoot,
   ctpOrderChangeSubscriptionKey
@@ -86,31 +77,173 @@ export async function deleteChangedOrderSubscription(
   }
 }
 
-export async function createChangedOrderSubscription(
-  apiRoot,
-  topicName,
-  projectId,
-  ctpOrderChangeSubscriptionKey
-) {
-  await deleteChangedOrderSubscription(apiRoot, ctpOrderChangeSubscriptionKey);
+/**
+ * Create all required custom types for Order Syncer
+ * This function is called during post-deploy to set up custom types
+ * 
+ * @param {Object} apiRoot - commercetools API client
+ */
+export async function createCustomTypes(apiRoot) {
+  logger.info('Creating custom types for Order Syncer...');
 
-  await apiRoot
-    .subscriptions()
-    .post({
-      body: {
-        key: ctpOrderChangeSubscriptionKey,
-        destination: {
-          type: 'GoogleCloudPubSub',
-          topic: topicName,
-          projectId,
-        },
-        messages: [
-          {
-            resourceTypeId: 'order',
-            types: MESSAGE_TYPE,
+  try {
+    await addOrUpdateCustomType(apiRoot, ORDER_TAX_CUSTOM_TYPE);
+    logger.info(`Custom type '${ORDER_TAX_CUSTOM_TYPE.key}' or field definitions related with Order Syncer have been created successfully`);
+  } catch (error) {
+    logger.error(`Failed to create custom type '${ORDER_TAX_CUSTOM_TYPE.key}' or field definitions related with Order Syncer:`, error);
+    throw new Error(`Custom type creation or field definitions related with Order Syncer creation failed: ${error.message}`);
+  }
+
+  logger.info('Custom types for Order Syncer created successfully');
+} 
+
+/**
+ * Add or update a custom type
+ * @param {Object} apiRoot - commercetools API client
+ * @param {Object} customType - Custom type definition
+ */
+async function addOrUpdateCustomType(apiRoot, customType) {
+  // Search for types by resourceTypeIds
+  const types = await getCustomTypesByResourceTypeId(apiRoot, customType.resourceTypeIds[0]);
+
+  // Update all types that match
+  for (const type of types) {
+    const updates = (customType.fieldDefinitions ?? [])
+      .filter(
+        (newFieldDefinition) =>
+          !type.fieldDefinitions?.find(
+            (existingFieldDefinition) =>
+              newFieldDefinition.name === existingFieldDefinition.name
+          )
+      )
+      .map((fieldDefinition) => ({
+        action: 'addFieldDefinition',
+        fieldDefinition: fieldDefinition,
+      }));
+
+    if (updates.length !== 0) {
+      await apiRoot
+        .types()
+        .withKey({ key: type.key })
+        .post({
+          body: {
+            version: type.version,
+            actions: updates,
           },
-        ],
-      },
-    })
-    .execute();
+        })
+        .execute();
+    }
+  }
+
+  // Create the type if it doesn't exist
+  if (!types.find((type) => type.key === customType.key)) {
+    await apiRoot
+      .types()
+      .post({
+        body: customType,
+      })
+      .execute();
+  }
+}
+
+/**
+ * Get custom types by resourceTypeId
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string} resourceTypeId - The resource type ID to search for
+ * @returns {Promise<Array>} Array of custom types that match the resourceTypeId
+ */
+async function getCustomTypesByResourceTypeId(apiRoot, resourceTypeId) {
+  try {
+    const { body: { results: types } } = await apiRoot
+      .types()
+      .get({
+        queryArgs: {
+          where: `resourceTypeIds contains any ("${resourceTypeId}")`,
+        },
+      })
+      .execute();
+    
+    return types || [];
+  } catch (error) {
+    if (error.statusCode === 404) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+/**
+ * Delete all custom types created by the Order Syncer
+ * This function is called during pre-undeploy to clean up custom types
+ * 
+ * @param {Object} apiRoot - commercetools API client
+ * @param {boolean} cleanupCustomTypes - Whether to remove custom types (default: false)
+ */
+export async function deleteCustomTypes(apiRoot, cleanupCustomTypes = false) {
+  if (!cleanupCustomTypes) {
+    logger.info('Custom type cleanup disabled. Custom types will remain in commercetools.');
+    return;
+  }
+
+  logger.info('Cleaning up custom types...');
+
+  try {
+    await deleteOrUpdateCustomType(apiRoot, ORDER_TAX_CUSTOM_TYPE);
+    logger.info(`Field definitions or custom type '${ORDER_TAX_CUSTOM_TYPE.key}' related with Order Syncer have been removed successfully`);
+  } catch (error) {
+    logger.error('Could not remove custom type or field definitions related with Order Syncer:', error);
+  }
+
+  logger.info('Custom types for Order Syncer cleanup completed');
+}
+
+/**
+ * Delete or update a custom type
+ * @param {Object} apiRoot - commercetools API client
+ * @param {Object} customType - Custom type definition
+ */
+async function deleteOrUpdateCustomType(apiRoot, customType) {
+  // Search for types by resourceTypeIds
+  const types = await getCustomTypesByResourceTypeId(apiRoot, customType.resourceTypeIds[0]);
+
+  // Update all types that match
+  for (const type of types) {
+    const updates = (customType.fieldDefinitions ?? [])
+      .filter(
+        (newFieldDefinition) =>
+          !!type.fieldDefinitions?.find(
+            (existingFieldDefinition) =>
+              newFieldDefinition.name === existingFieldDefinition.name
+            )
+      )
+      .map((fieldDefinition) => ({
+        action: 'removeFieldDefinition',
+        fieldName: fieldDefinition.name,
+      }));
+
+    if (updates.length !== 0) {
+      if (type.fieldDefinitions?.length === 1) {
+        await apiRoot
+          .types()
+          .withKey({ key: type.key })
+          .delete({
+            queryArgs: {
+              version: type.version,
+            }
+          })
+          .execute();
+      } else {
+        await apiRoot
+          .types()
+          .withKey({ key: type.key })
+          .post({
+            body: {
+              version: type.version,
+              actions: updates,
+            }
+          })
+          .execute();
+      }
+    }
+  }
 }

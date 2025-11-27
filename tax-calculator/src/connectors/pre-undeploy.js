@@ -5,6 +5,10 @@ import { deleteCTPExtension } from './action.js';
 import { CTP_TAX_CALCULATOR_EXTENSION_KEY } from './constants.js';
 import { deleteCustomTypes } from './action.js';
 
+/**
+ * Performs pre-undeploy cleanup operations
+ * Deletes the commercetools API extension and custom types
+ */
 async function preUndeploy() {
   const apiRoot = createApiRoot();
 
@@ -15,6 +19,10 @@ async function preUndeploy() {
   await deleteCustomTypes(apiRoot, true);
 }
 
+/**
+ * Main entry point for pre-undeploy script
+ * Executes preUndeploy and handles errors by writing to stderr and setting exit code
+ */
 async function run() {
   try {
     await preUndeploy();

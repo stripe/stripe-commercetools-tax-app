@@ -595,6 +595,304 @@ describe('ShipFromService', () => {
 
       expect(cached).toBeNull();
     });
+
+    it('should return null when cache is expired', () => {
+      const channelId = 'channel-expired';
+      const address = { country: 'US' };
+
+      shipFromService.saveToCache(channelId, address);
+      
+      // Manually expire cache by setting old timestamp
+      const cache = shipFromService.channelCache;
+      const cached = cache.get(channelId);
+      if (cached) {
+        cached.timestamp = Date.now() - (6 * 60 * 1000); // 6 minutes ago
+      }
+
+      const result = shipFromService.getFromCache(channelId);
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('selectOptimalChannel', () => {
+    it('should select channel by priority when CHANNEL_PRIORITY is set', async () => {
+      process.env.CHANNEL_PRIORITY = 'channel-2,channel-1,channel-3';
+
+      const entries = [
+        {
+          sku: 'SKU-123',
+          availableQuantity: 5,
+          supplyChannel: {
+            id: 'channel-1',
+            obj: {
+              address: {
+                country: 'US',
+                state: 'NY',
+                city: 'New York',
+                postalCode: '10001'
+              }
+            }
+          }
+        },
+        {
+          sku: 'SKU-123',
+          availableQuantity: 10,
+          supplyChannel: {
+            id: 'channel-2',
+            obj: {
+              address: {
+                country: 'US',
+                state: 'CA',
+                city: 'Los Angeles',
+                postalCode: '90001'
+              }
+            }
+          }
+        }
+      ];
+
+      const result = await shipFromService.selectOptimalChannel(entries);
+
+      expect(result.supplyChannel.id).toBe('channel-2');
+      expect(result.selectionReason).toBe('priority_based');
+    });
+
+    it('should select channel with highest stock when no priority is set', async () => {
+      delete process.env.CHANNEL_PRIORITY;
+
+      const entries = [
+        {
+          sku: 'SKU-123',
+          availableQuantity: 5,
+          supplyChannel: {
+            id: 'channel-1',
+            obj: {
+              address: {
+                country: 'US',
+                state: 'NY',
+                city: 'New York',
+                postalCode: '10001'
+              }
+            }
+          }
+        },
+        {
+          sku: 'SKU-123',
+          availableQuantity: 20,
+          supplyChannel: {
+            id: 'channel-2',
+            obj: {
+              address: {
+                country: 'US',
+                state: 'CA',
+                city: 'Los Angeles',
+                postalCode: '90001'
+              }
+            }
+          }
+        },
+        {
+          sku: 'SKU-123',
+          availableQuantity: 10,
+          supplyChannel: {
+            id: 'channel-3',
+            obj: {
+              address: {
+                country: 'US',
+                state: 'TX',
+                city: 'Austin',
+                postalCode: '78701'
+              }
+            }
+          }
+        }
+      ];
+
+      const result = await shipFromService.selectOptimalChannel(entries);
+
+      expect(result.supplyChannel.id).toBe('channel-2');
+      expect(result.selectionReason).toBe('highest_stock');
+      expect(result.availableQuantity).toBe(20);
+    });
+
+    it('should handle empty priority configuration', async () => {
+      process.env.CHANNEL_PRIORITY = '';
+
+      const entries = [
+        {
+          sku: 'SKU-123',
+          availableQuantity: 10,
+          supplyChannel: {
+            id: 'channel-1',
+            obj: {
+              address: {
+                country: 'US',
+                state: 'NY',
+                city: 'New York',
+                postalCode: '10001'
+              }
+            }
+          }
+        }
+      ];
+
+      const result = await shipFromService.selectOptimalChannel(entries);
+
+      expect(result.selectionReason).toBe('highest_stock');
+    });
+  });
+
+  describe('getAddressFromInventory - edge cases', () => {
+    it('should filter out entries with no stock', async () => {
+      const sku = 'SKU-NO-STOCK';
+      const mockInventory = {
+        get: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({
+          body: {
+            results: [
+              {
+                sku: sku,
+                availableQuantity: 0,
+                supplyChannel: {
+                  id: 'channel-1',
+                  obj: {
+                    address: {
+                      country: 'US',
+                      state: 'NY',
+                      city: 'New York',
+                      postalCode: '10001'
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        })
+      };
+
+      mockApiRoot.inventory.mockReturnValue(mockInventory);
+
+      const result = await shipFromService.getAddressFromInventory(sku);
+
+      expect(result).toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(
+        'No inventory entries with valid addresses found',
+        { sku }
+      );
+    });
+
+    it('should handle inventory entries without supplyChannel.obj', async () => {
+      const sku = 'SKU-NO-OBJ';
+      const mockInventory = {
+        get: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({
+          body: {
+            results: [
+              {
+                sku: sku,
+                availableQuantity: 10,
+                supplyChannel: {
+                  id: 'channel-1'
+                  // No obj property
+                }
+              }
+            ]
+          }
+        })
+      };
+
+      mockApiRoot.inventory.mockReturnValue(mockInventory);
+
+      const result = await shipFromService.getAddressFromInventory(sku);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('resolveShipFromForLineItem - error handling', () => {
+    it('should throw error when SHIP_FROM_REQUIRED is true and resolution fails', async () => {
+      process.env.SHIP_FROM_REQUIRED = 'true';
+
+      const lineItem = {
+        id: 'line-item-error',
+        variant: { sku: 'SKU-ERROR' }
+      };
+
+      // Mock getAddressFromInventory to throw error
+      const originalGetAddressFromInventory = shipFromService.getAddressFromInventory;
+      shipFromService.getAddressFromInventory = jest.fn().mockRejectedValue(new Error('API Error'));
+
+      await expect(shipFromService.resolveShipFromForLineItem(lineItem)).rejects.toThrow('API Error');
+
+      // Restore original method
+      shipFromService.getAddressFromInventory = originalGetAddressFromInventory;
+    });
+
+    it('should handle error when channel fetch fails in strategy 1', async () => {
+      const lineItem = {
+        id: 'line-item-1',
+        supplyChannel: { id: 'channel-error' },
+        variant: { sku: 'SKU-123' }
+      };
+
+      const mockChannel = {
+        withId: jest.fn().mockReturnThis(),
+        get: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockRejectedValue(new Error('Channel fetch failed'))
+      };
+
+      mockApiRoot.channels.mockReturnValue(mockChannel);
+
+      // Should fallback to strategy 2 (inventory)
+      const mockInventory = {
+        get: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({
+          body: {
+            results: [
+              {
+                sku: 'SKU-123',
+                availableQuantity: 10,
+                supplyChannel: {
+                  id: 'channel-2',
+                  obj: {
+                    address: {
+                      country: 'US',
+                      state: 'CA',
+                      city: 'San Francisco',
+                      postalCode: '94102'
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        })
+      };
+
+      mockApiRoot.inventory.mockReturnValue(mockInventory);
+
+      const result = await shipFromService.resolveShipFromForLineItem(lineItem);
+
+      expect(result.source).toBe('inventory.supplyChannel');
+    });
+  });
+
+  describe('getChannelPriority', () => {
+    it('should return empty array when CHANNEL_PRIORITY is not set', () => {
+      delete process.env.CHANNEL_PRIORITY;
+
+      const result = shipFromService.getChannelPriority();
+
+      expect(result).toEqual([]);
+    });
+
+    it('should parse CHANNEL_PRIORITY with spaces', () => {
+      process.env.CHANNEL_PRIORITY = 'channel-1, channel-2 , channel-3';
+
+      const result = shipFromService.getChannelPriority();
+
+      expect(result).toEqual(['channel-1', 'channel-2', 'channel-3']);
+    });
   });
 });
 

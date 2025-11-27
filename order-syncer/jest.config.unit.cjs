@@ -1,8 +1,9 @@
 module.exports = {
-    rootDir: '../../',
     displayName: 'Tests Javascript Application - Service',
-    testMatch: ['**/test/integration/?(*.)+(spec|test).js?(x)'],
+    moduleDirectories: ['node_modules', 'src'],
+    testMatch: ['**/tests/**/*.js?(x)', '**/?(*.)+(spec|test).js?(x)'],
     testEnvironment: 'node',
     verbose: true,
     silent: true,
+    collectCoverage: true
 };
