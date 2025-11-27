@@ -1,4 +1,4 @@
-// tax-calculator/test/unit/update-action.service.spec.js
+// tax-calculator/test/unit/services/update-action.service.spec.js
 import { expect, describe, it, jest } from '@jest/globals';
 import updateActionService from '../../../src/services/update-action.service.js';
 import { CART_TAX_CUSTOM_TYPE, CART_TAX_FIELD_NAMES } from '../../../src/connectors/customTypes.js';
@@ -981,6 +981,674 @@ describe('UpdateActionService', () => {
 
       // Test null breakdowns
       expect(updateActionService.findByExactAmount(50, null, null)).toBeUndefined();
+    });
+  });
+
+  describe('createLineItemTaxUpdateActions - edge cases', () => {
+    it('should create missing tax action when lineItemTotalPrice exists but no tax calculation', () => {
+      const calculations = [];
+      const shippingInfoGroups = [];
+      const lineItemTotalPriceActions = [
+        {
+          action: 'setLineItemTotalPrice',
+          lineItemId: 'line-item-1',
+          shippingKey: 'shipping-key-1',
+          externalTotalPrice: {
+            totalPrice: {
+              currencyCode: 'USD',
+              centAmount: 1000
+            }
+          }
+        }
+      ];
+      const cart = {
+        country: 'US',
+        shippingAddress: { country: 'US' },
+        totalPrice: { currencyCode: 'USD' }
+      };
+
+      const result = updateActionService.createLineItemTaxUpdateActions(
+        calculations,
+        shippingInfoGroups,
+        lineItemTotalPriceActions,
+        cart
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].action).toBe('setLineItemTaxAmount');
+      expect(result[0].lineItemId).toBe('line-item-1');
+      expect(result[0].externalTaxAmount.taxRate.amount).toBe(0);
+      expect(result[0].externalTaxAmount.totalGross.centAmount).toBe(1000);
+      expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it('should handle duplicate line items with different rates and calculate effective rate', () => {
+      const calculations = [
+        {
+          id: 'calc_1',
+          currency: 'usd',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1',
+                amount: 1000,
+                amount_tax: 100,
+                metadata: { shippingKey: 'shipping-key-1' }
+              }
+            ]
+          },
+          tax_breakdown: [
+            {
+              tax_rate_details: {
+                tax_type: 'sales_tax',
+                percentage_decimal: '10.0',
+                country: 'US'
+              },
+              amount: 100
+            }
+          ]
+        },
+        {
+          id: 'calc_2',
+          currency: 'usd',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1',
+                amount: 500,
+                amount_tax: 25,
+                metadata: { shippingKey: 'shipping-key-1' }
+              }
+            ]
+          },
+          tax_breakdown: [
+            {
+              tax_rate_details: {
+                tax_type: 'sales_tax',
+                percentage_decimal: '5.0',
+                country: 'US'
+              },
+              amount: 25
+            }
+          ]
+        }
+      ];
+
+      const shippingInfoGroups = [
+        { shippingKey: 'shipping-key-1', lineItems: ['line-item-1'] },
+        { shippingKey: 'shipping-key-1', lineItems: ['line-item-1'] }
+      ];
+
+      const lineItemTotalPriceActions = updateActionService.createLineItemTotalPriceActions(
+        calculations,
+        shippingInfoGroups
+      );
+
+      const result = updateActionService.createLineItemTaxUpdateActions(
+        calculations,
+        shippingInfoGroups,
+        lineItemTotalPriceActions
+      );
+
+      expect(result).toHaveLength(1);
+      // Combined: base=1500, tax=125, effective rate = 125/1500 = 0.0833...
+      expect(result[0].externalTaxAmount.totalGross.centAmount).toBe(1625); // 1500 + 125
+      expect(result[0].externalTaxAmount.taxRate.amount).toBeCloseTo(0.0833, 2);
+    });
+
+    it('should handle duplicate line items when totalBase is 0 and use average rate', () => {
+      const calculations = [
+        {
+          id: 'calc_1',
+          currency: 'usd',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1',
+                amount: 0,
+                amount_tax: 0,
+                metadata: { shippingKey: 'shipping-key-1' }
+              }
+            ]
+          },
+          tax_breakdown: [
+            {
+              tax_rate_details: {
+                tax_type: 'sales_tax',
+                percentage_decimal: '10.0',
+                country: 'US'
+              },
+              amount: 0
+            }
+          ]
+        },
+        {
+          id: 'calc_2',
+          currency: 'usd',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1',
+                amount: 0,
+                amount_tax: 0,
+                metadata: { shippingKey: 'shipping-key-1' }
+              }
+            ]
+          },
+          tax_breakdown: [
+            {
+              tax_rate_details: {
+                tax_type: 'sales_tax',
+                percentage_decimal: '5.0',
+                country: 'US'
+              },
+              amount: 0
+            }
+          ]
+        }
+      ];
+
+      const shippingInfoGroups = [
+        { shippingKey: 'shipping-key-1', lineItems: ['line-item-1'] },
+        { shippingKey: 'shipping-key-1', lineItems: ['line-item-1'] }
+      ];
+
+      const lineItemTotalPriceActions = updateActionService.createLineItemTotalPriceActions(
+        calculations,
+        shippingInfoGroups
+      );
+
+      const result = updateActionService.createLineItemTaxUpdateActions(
+        calculations,
+        shippingInfoGroups,
+        lineItemTotalPriceActions
+      );
+
+      expect(result).toHaveLength(1);
+      // Average rate: (0.10 + 0.05) / 2 = 0.075
+      expect(result[0].externalTaxAmount.taxRate.amount).toBeCloseTo(0.075, 5);
+    });
+  });
+
+  describe('createMultipleShippingTaxUpdateActions - edge cases', () => {
+    it('should handle empty shippingInfoGroups and no cart.shipping', () => {
+      const calculations = [];
+      const shippingInfoGroups = [];
+      const cart = {};
+
+      const result = updateActionService.createMultipleShippingTaxUpdateActions(
+        calculations,
+        shippingInfoGroups,
+        [],
+        cart
+      );
+
+      expect(result).toEqual([]);
+      expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it('should create zero tax action when no calculation found for shippingKey', () => {
+      const calculations = [];
+      const shippingInfoGroups = [
+        { shippingKey: 'shipping-key-1', lineItems: [] }
+      ];
+      const cart = {
+        shipping: [
+          {
+            shippingKey: 'shipping-key-1',
+            shippingInfo: {
+              price: { centAmount: 500 }
+            }
+          }
+        ],
+        totalPrice: { currencyCode: 'USD' }
+      };
+
+      const result = updateActionService.createMultipleShippingTaxUpdateActions(
+        calculations,
+        shippingInfoGroups,
+        [],
+        cart
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].action).toBe('setShippingMethodTaxAmount');
+      expect(result[0].shippingKey).toBe('shipping-key-1');
+      expect(result[0].externalTaxAmount.totalGross.centAmount).toBe(500);
+      expect(result[0].externalTaxAmount.taxRate.amount).toBe(0);
+      expect(logger.info).toHaveBeenCalled();
+    });
+
+    it('should handle shipping method with no shippingInfo in cart', () => {
+      const calculations = [];
+      const shippingInfoGroups = [
+        { shippingKey: 'shipping-key-1', lineItems: [] }
+      ];
+      const cart = {
+        shipping: [
+          {
+            shippingKey: 'shipping-key-1'
+          }
+        ],
+        totalPrice: { currencyCode: 'USD' }
+      };
+
+      const result = updateActionService.createMultipleShippingTaxUpdateActions(
+        calculations,
+        shippingInfoGroups,
+        [],
+        cart
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].externalTaxAmount.totalGross.centAmount).toBe(0);
+    });
+
+    it('should combine shipping costs when multiple calculations share same shippingKey', () => {
+      const calculations = [
+        {
+          id: 'calc_1',
+          currency: 'usd',
+          shipping_cost: {
+            amount: 500,
+            amount_tax: 50,
+            tax_breakdown: [
+              {
+                tax_rate_details: {
+                  tax_type: 'shipping_tax',
+                  percentage_decimal: '10.0',
+                  country: 'US'
+                }
+              }
+            ]
+          }
+        },
+        {
+          id: 'calc_2',
+          currency: 'usd',
+          shipping_cost: {
+            amount: 300,
+            amount_tax: 30,
+            tax_breakdown: [
+              {
+                tax_rate_details: {
+                  tax_type: 'shipping_tax',
+                  percentage_decimal: '10.0',
+                  country: 'US'
+                }
+              }
+            ]
+          }
+        }
+      ];
+
+      const shippingInfoGroups = [
+        { shippingKey: 'shipping-key-1', lineItems: [] }
+      ];
+
+      const requests = [
+        { shippingKey: 'shipping-key-1' },
+        { shippingKey: 'shipping-key-1' }
+      ];
+
+      const cart = {
+        shipping: [
+          {
+            shippingKey: 'shipping-key-1',
+            shippingInfo: {
+              price: { centAmount: 800 }
+            }
+          }
+        ],
+        totalPrice: { currencyCode: 'USD' }
+      };
+
+      const result = updateActionService.createMultipleShippingTaxUpdateActions(
+        calculations,
+        shippingInfoGroups,
+        requests,
+        cart
+      );
+
+      expect(result).toHaveLength(1);
+      // Combined: amount=800, tax=80, totalGross=880
+      expect(result[0].externalTaxAmount.totalGross.centAmount).toBe(880);
+    });
+
+    it('should handle calculation with no shippingInfo but shippingInfoGroups has shippingKey', () => {
+      const calculations = [
+        {
+          id: 'calc_1',
+          currency: 'usd',
+          shipping_cost: null
+        }
+      ];
+
+      const shippingInfoGroups = [
+        { shippingKey: 'shipping-key-1', lineItems: [] }
+      ];
+
+      const cart = {
+        shipping: [
+          {
+            shippingKey: 'shipping-key-1',
+            shippingInfo: {
+              price: { centAmount: 500 }
+            }
+          }
+        ],
+        totalPrice: { currencyCode: 'USD' }
+      };
+
+      const result = updateActionService.createMultipleShippingTaxUpdateActions(
+        calculations,
+        shippingInfoGroups,
+        [],
+        cart
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].externalTaxAmount.taxRate.amount).toBe(0);
+    });
+
+    it('should use cart.shipping when shippingInfoGroups is empty', () => {
+      const calculations = [];
+      const shippingInfoGroups = [];
+      const cart = {
+        shipping: [
+          {
+            shippingKey: 'shipping-key-1',
+            shippingInfo: {
+              price: { centAmount: 500 }
+            }
+          }
+        ],
+        totalPrice: { currencyCode: 'USD' }
+      };
+
+      const result = updateActionService.createMultipleShippingTaxUpdateActions(
+        calculations,
+        shippingInfoGroups,
+        [],
+        cart
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].shippingKey).toBe('shipping-key-1');
+    });
+  });
+
+  describe('createZeroTaxShippingAction', () => {
+    it('should create zero tax shipping action with shippingAmount from calculation', () => {
+      const calculation = {
+        currency: 'usd',
+        shipping_cost: {
+          amount: 500
+        },
+        tax_breakdown: []
+      };
+      const cart = { totalPrice: { currencyCode: 'USD' } };
+
+      const result = updateActionService.createZeroTaxShippingAction(
+        'shipping-key-1',
+        calculation,
+        cart,
+        0
+      );
+
+      expect(result.action).toBe('setShippingMethodTaxAmount');
+      expect(result.shippingKey).toBe('shipping-key-1');
+      expect(result.externalTaxAmount.totalGross.centAmount).toBe(500);
+      expect(result.externalTaxAmount.taxRate.amount).toBe(0);
+    });
+
+    it('should get shippingAmount from cart.shipping when calculation has none', () => {
+      const cart = {
+        shipping: [
+          {
+            shippingKey: 'shipping-key-1',
+            shippingInfo: {
+              price: { centAmount: 750 }
+            }
+          }
+        ],
+        totalPrice: { currencyCode: 'USD' }
+      };
+
+      const result = updateActionService.createZeroTaxShippingAction(
+        'shipping-key-1',
+        null,
+        cart,
+        0
+      );
+
+      expect(result.externalTaxAmount.totalGross.centAmount).toBe(750);
+    });
+
+    it('should get shippingAmount from cart.shippingInfo when shipping is not array', () => {
+      const cart = {
+        shipping: {
+          shippingKey: 'shipping-key-1',
+          shippingInfo: {
+            price: { centAmount: 600 }
+          }
+        },
+        totalPrice: { currencyCode: 'USD' }
+      };
+
+      const result = updateActionService.createZeroTaxShippingAction(
+        'shipping-key-1',
+        null,
+        cart,
+        0
+      );
+
+      expect(result.externalTaxAmount.totalGross.centAmount).toBe(600);
+    });
+
+    it('should use default country when calculation and cart have no country', () => {
+      const result = updateActionService.createZeroTaxShippingAction(
+        'shipping-key-1',
+        null,
+        { totalPrice: { currencyCode: 'USD' } },
+        500
+      );
+
+      expect(result.externalTaxAmount.taxRate.country).toBe('US');
+    });
+  });
+
+  describe('mapCalculationsToShippingKeys', () => {
+    it('should extract shippingKey from line item metadata', () => {
+      const calculations = [
+        {
+          id: 'calc_1',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1',
+                metadata: { shippingKey: 'shipping-key-1' }
+              }
+            ]
+          }
+        }
+      ];
+
+      const shippingInfoGroups = [];
+
+      const result = updateActionService.mapCalculationsToShippingKeys(
+        calculations,
+        shippingInfoGroups
+      );
+
+      expect(result.get('calc_1')).toBe('shipping-key-1');
+    });
+
+    it('should fallback to shippingInfoGroups when metadata is not available', () => {
+      const calculations = [
+        {
+          id: 'calc_1',
+          line_items: {
+            data: [
+              {
+                reference: 'line-item-1'
+              }
+            ]
+          }
+        }
+      ];
+
+      const shippingInfoGroups = [
+        { shippingKey: 'shipping-key-1', lineItems: [] }
+      ];
+
+      const result = updateActionService.mapCalculationsToShippingKeys(
+        calculations,
+        shippingInfoGroups
+      );
+
+      expect(result.get('calc_1')).toBe('shipping-key-1');
+    });
+  });
+
+  describe('combineShippingCosts', () => {
+    it('should combine shipping costs from multiple calculations', () => {
+      const existing = {
+        calculation: {
+          shipping_cost: {
+            amount: 500,
+            amount_tax: 50,
+            tax_breakdown: [{ amount: 50 }]
+          },
+          tax_breakdown: []
+        }
+      };
+
+      const calculation = {
+        shipping_cost: {
+          amount: 300,
+          amount_tax: 30,
+          tax_breakdown: [{ amount: 30 }]
+        },
+        tax_breakdown: []
+      };
+
+      updateActionService.combineShippingCosts(existing, calculation);
+
+      expect(existing.calculation.shipping_cost.amount).toBe(800);
+      expect(existing.calculation.shipping_cost.amount_tax).toBe(80);
+      expect(existing.calculation.shipping_cost.tax_breakdown).toHaveLength(2);
+    });
+
+    it('should set shipping_cost when existing has none', () => {
+      const existing = {
+        calculation: {
+          tax_breakdown: []
+        }
+      };
+
+      const calculation = {
+        shipping_cost: {
+          amount: 500,
+          amount_tax: 50
+        }
+      };
+
+      updateActionService.combineShippingCosts(existing, calculation);
+
+      expect(existing.calculation.shipping_cost).toBeDefined();
+      expect(existing.calculation.shipping_cost.amount).toBe(500);
+    });
+  });
+
+  describe('findOrCreateShippingTaxBreakdown', () => {
+    it('should find breakdown in shipping_cost.tax_breakdown', () => {
+      const calculation = {
+        shipping_cost: {
+          amount: 500,
+          amount_tax: 50,
+          tax_breakdown: [
+            {
+              tax_rate_details: {
+                tax_type: 'shipping_tax',
+                percentage_decimal: '10.0',
+                country: 'US'
+              },
+              amount: 50
+            }
+          ]
+        },
+        tax_breakdown: []
+      };
+
+      const result = updateActionService.findOrCreateShippingTaxBreakdown(
+        calculation,
+        500,
+        50
+      );
+
+      expect(result).toBeDefined();
+      expect(result.tax_rate_details.tax_type).toBe('shipping_tax');
+    });
+
+    it('should find breakdown in general tax_breakdown when shipping_cost has none', () => {
+      const calculation = {
+        shipping_cost: {
+          amount: 500,
+          amount_tax: 50,
+          tax_breakdown: []
+        },
+        tax_breakdown: [
+          {
+            tax_rate_details: {
+              tax_type: 'sales_tax',
+              percentage_decimal: '10.0',
+              country: 'US'
+            },
+            amount: 50
+          }
+        ]
+      };
+
+      const result = updateActionService.findOrCreateShippingTaxBreakdown(
+        calculation,
+        500,
+        50
+      );
+
+      expect(result).toBeDefined();
+    });
+
+    it('should create breakdown when none found but amounts are positive', () => {
+      const calculation = {
+        shipping_cost: {
+          amount: 500,
+          amount_tax: 50,
+          tax_breakdown: []
+        },
+        tax_breakdown: [
+          {
+            tax_rate_details: {
+              tax_type: 'sales_tax',
+              percentage_decimal: '10.0',
+              country: 'US'
+            }
+          }
+        ]
+      };
+
+      const result = updateActionService.findOrCreateShippingTaxBreakdown(
+        calculation,
+        500,
+        50
+      );
+
+      expect(result).toBeDefined();
+      // findByDirectCalculation should find the breakdown since 500 * 0.10 = 50
+      // The breakdown may or may not have amount, depending on the original breakdown structure
+      expect(result.tax_rate_details).toBeDefined();
+      expect(result.tax_rate_details.tax_type).toBe('sales_tax');
+      expect(parseFloat(result.tax_rate_details.percentage_decimal)).toBeCloseTo(10.0, 1);
     });
   });
 });

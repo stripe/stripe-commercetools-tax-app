@@ -509,4 +509,240 @@ describe('action.js', () => {
       expect(logger.warn).toHaveBeenCalled();
     });
   });
+
+  describe('createCTPExtension - edge cases', () => {
+    it('should throw error when ctpExtensionBaseUrl is missing', async () => {
+      await expect(
+        createCTPExtension(mockApiRoot, 'test-key', null)
+      ).rejects.toThrow('ctpExtensionBaseUrl is required');
+
+      await expect(
+        createCTPExtension(mockApiRoot, 'test-key', undefined)
+      ).rejects.toThrow('ctpExtensionBaseUrl is required');
+
+      await expect(
+        createCTPExtension(mockApiRoot, 'test-key', '')
+      ).rejects.toThrow('ctpExtensionBaseUrl is required');
+    });
+
+    it('should handle error when extension deletion fails', async () => {
+      const existingExtension = {
+        id: 'ext-123',
+        version: 1
+      };
+
+      mockApiRoot._extensionsMock._mockGet.mockResolvedValue({
+        body: { results: [existingExtension] }
+      });
+      mockApiRoot._extensionsMock._mockWithKeyDelete.mockRejectedValue(
+        new Error('Delete failed')
+      );
+
+      await expect(
+        createCTPExtension(mockApiRoot, 'test-key', 'https://example.com')
+      ).rejects.toThrow('Failed to sync API extension');
+    });
+
+    it('should handle error when extension creation fails after deletion', async () => {
+      const existingExtension = {
+        id: 'ext-123',
+        version: 1
+      };
+
+      mockApiRoot._extensionsMock._mockGet.mockResolvedValue({
+        body: { results: [existingExtension] }
+      });
+      mockApiRoot._extensionsMock._mockWithKeyDelete.mockResolvedValue({});
+      mockApiRoot._extensionsMock._mockPost.mockRejectedValue(
+        new Error('Creation failed')
+      );
+
+      await expect(
+        createCTPExtension(mockApiRoot, 'test-key', 'https://example.com')
+      ).rejects.toThrow('Failed to sync API extension');
+    });
+  });
+
+  describe('validateTaxCodeMapping - edge cases', () => {
+    it('should handle error when category query fails', async () => {
+      const mapping = {
+        categories: [
+          {
+            ctCategory: { id: 'cat-1' },
+            taxCode: 'txcd_123'
+          }
+        ]
+      };
+
+      mockApiRoot._categoriesMock._mockGet.mockRejectedValue(
+        new Error('API error')
+      );
+
+      await expect(validateTaxCodeMapping(mockApiRoot, mapping)).rejects.toThrow(
+        'Failed to validate category mapping'
+      );
+    });
+
+    it('should handle category with both id and key', async () => {
+      const mapping = {
+        categories: [
+          {
+            ctCategory: { id: 'cat-1', key: 'category-key' },
+            taxCode: 'txcd_123'
+          }
+        ]
+      };
+
+      mockApiRoot._categoriesMock._mockGet.mockResolvedValue({
+        body: { results: [{ id: 'cat-1', key: 'category-key' }] }
+      });
+
+      await validateTaxCodeMapping(mockApiRoot, mapping);
+
+      expect(mockApiRoot._categoriesMock._mockGet).toHaveBeenCalled();
+      const whereQuery = mockApiRoot._categoriesMock.get.mock.calls[0][0].queryArgs.where;
+      expect(whereQuery).toContain('id="cat-1"');
+      expect(whereQuery).toContain('key="category-key"');
+    });
+  });
+
+  describe('createCustomTypes - edge cases', () => {
+    it('should handle error when fetching existing types fails', async () => {
+      mockApiRoot._typesMock._mockGet.mockRejectedValue(
+        new Error('Fetch failed')
+      );
+
+      await expect(createCustomTypes(mockApiRoot)).rejects.toThrow(
+        'Custom type creation or field definitions related with Stripe Tax Connector creation failed'
+      );
+    });
+
+    it('should not update when all field definitions already exist', async () => {
+      const existingType = {
+        key: 'test-custom-type-1',
+        version: 1,
+        resourceTypeIds: ['product-price'],
+        fieldDefinitions: [
+          {
+            name: 'connectorStripeTax_TaxCode',
+            type: { name: 'String' }
+          }
+        ]
+      };
+
+      mockApiRoot._typesMock._mockGet.mockResolvedValue({
+        body: { results: [existingType] }
+      });
+
+      await createCustomTypes(mockApiRoot);
+
+      // Should not call post for updates since all fields exist
+      expect(mockApiRoot._typesMock._mockWithKeyPost).not.toHaveBeenCalled();
+    });
+
+    it('should create type when it does not exist', async () => {
+      mockApiRoot._typesMock._mockGet.mockResolvedValue({
+        body: { results: [] }
+      });
+      mockApiRoot._typesMock._mockPost.mockResolvedValue({});
+
+      await createCustomTypes(mockApiRoot);
+
+      expect(mockApiRoot._typesMock._mockPost).toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteCustomTypes - edge cases', () => {
+    it('should handle error when fetching types fails during deletion', async () => {
+      mockApiRoot._typesMock._mockGet.mockRejectedValue(
+        new Error('Fetch failed')
+      );
+
+      // Should not throw, but log error
+      await deleteCustomTypes(mockApiRoot, true);
+
+      expect(logger.error).toHaveBeenCalled();
+    });
+
+    it('should delete type when it has only one field definition', async () => {
+      const existingType = {
+        key: 'test-custom-type-1',
+        version: 1,
+        resourceTypeIds: ['product-price'],
+        fieldDefinitions: [
+          {
+            name: 'connectorStripeTax_TaxCode'
+          }
+        ]
+      };
+
+      mockApiRoot._typesMock._mockGet.mockResolvedValue({
+        body: { results: [existingType] }
+      });
+      mockApiRoot._typesMock._mockWithKeyDelete.mockResolvedValue({});
+
+      await deleteCustomTypes(mockApiRoot, true);
+
+      expect(mockApiRoot._typesMock._mockWithKeyDelete).toHaveBeenCalled();
+    });
+
+    it('should handle error when type deletion fails', async () => {
+      const existingType = {
+        key: 'test-custom-type-1',
+        version: 1,
+        resourceTypeIds: ['product-price'],
+        fieldDefinitions: [
+          {
+            name: 'connectorStripeTax_TaxCode'
+          }
+        ]
+      };
+
+      mockApiRoot._typesMock._mockGet.mockResolvedValue({
+        body: { results: [existingType] }
+      });
+      mockApiRoot._typesMock._mockWithKeyDelete.mockRejectedValue(
+        new Error('Delete failed')
+      );
+
+      // Should not throw, but log error
+      await deleteCustomTypes(mockApiRoot, true);
+
+      expect(logger.error).toHaveBeenCalled();
+    });
+  });
+
+  describe('validateCustomTypes - edge cases', () => {
+    it('should handle 404 error when fetching types', async () => {
+      const error = new Error('Not found');
+      error.statusCode = 404;
+      mockApiRoot._typesMock._mockGet.mockRejectedValue(error);
+
+      const result = await validateCustomTypes(mockApiRoot);
+
+      expect(result.isValid).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+
+    it('should validate custom type with multiple resource types', async () => {
+      const existingType = {
+        key: 'test-custom-type-1',
+        resourceTypeIds: ['product-price', 'line-item'],
+        fieldDefinitions: [
+          {
+            name: 'connectorStripeTax_TaxCode'
+          }
+        ]
+      };
+
+      mockApiRoot._typesMock._mockGet.mockResolvedValue({
+        body: { results: [existingType] }
+      });
+
+      const result = await validateCustomTypes(mockApiRoot);
+
+      expect(result.isValid).toBe(true);
+      expect(result.customTypes[0].resourceTypes).toHaveLength(2);
+    });
+  });
 });

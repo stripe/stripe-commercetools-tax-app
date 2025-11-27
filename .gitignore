@@ -30,6 +30,10 @@ order-syncer/.env
 .idea
 .DS_Store
 
+# Test coverage
+tax-calculator/coverage/
+order-syncer/coverage/
+
 # AI Generated Files
 .claude
 CLAUDE.md

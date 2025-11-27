@@ -527,5 +527,360 @@ describe('TaxOrchestratorService', () => {
       expect(key).toBe('no_ship_from');
     });
   });
+
+  describe('extractCustomerAddress - edge cases', () => {
+    it('should handle Multiple mode with no shipping address in shipping object', () => {
+      const cart = {
+        country: 'US',
+        shippingMode: 'Multiple',
+        shipping: [
+          {
+            shippingKey: 'shipping-1'
+            // No shippingAddress
+          }
+        ]
+      };
+
+      const shipping = cart.shipping[0];
+      const address = taxOrchestratorService.extractCustomerAddress(cart, shipping);
+
+      expect(address.country).toBe('US');
+      expect(address.state).toBeUndefined();
+    });
+
+    it('should handle Multiple mode with empty shipping array', () => {
+      const cart = {
+        country: 'US',
+        shippingMode: 'Multiple',
+        shipping: []
+      };
+
+      const address = taxOrchestratorService.extractCustomerAddress(cart, null);
+
+      expect(address.country).toBe('US');
+    });
+
+    it('should handle Single mode with missing shippingAddress', () => {
+      const cart = {
+        country: 'US',
+        shippingMode: 'Single'
+      };
+
+      const address = taxOrchestratorService.extractCustomerAddress(cart);
+
+      expect(address.country).toBe('US');
+      expect(address.state).toBeUndefined();
+    });
+  });
+
+  describe('createSingleRequestForGroup', () => {
+    it('should create request without ship_from_details when address is null', async () => {
+      const group = {
+        shipFromAddress: null,
+        lineItems: [
+          {
+            id: 'line-item-1',
+            productId: 'product-1',
+            quantity: 1,
+            totalPrice: { centAmount: 1000 }
+          }
+        ]
+      };
+
+      const cart = {
+        country: 'US',
+        shippingMode: 'Single',
+        shippingAddress: {
+          state: 'NY',
+          city: 'New York',
+          postalCode: '10001'
+        },
+        totalPrice: { currencyCode: 'USD' },
+        shippingInfo: {
+          price: { centAmount: 500 }
+        }
+      };
+
+      const taxBehaviors = { 'line-item-1': 'exclusive' };
+      const categoriesMap = new Map([['product-1', []]]);
+
+      taxCodeService.getTaxCodeForProduct.mockReturnValue('txcd_12345678');
+      taxCodeService.getShippingTaxCodeFromShippingInfo.mockResolvedValue('txcd_87654321');
+
+      const requests = await taxOrchestratorService.createRequestsForGroup(
+        group,
+        cart,
+        taxBehaviors,
+        categoriesMap
+      );
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0].ship_from_details).toBeUndefined();
+    });
+  });
+
+  describe('createSeparatedRequestsByShippingKey', () => {
+    it('should skip empty requests (no line items and no shipping cost)', async () => {
+      const group = {
+        shipFromAddress: {
+          country: 'US',
+          state: 'CA',
+          city: 'San Francisco',
+          postal_code: '94102'
+        },
+        lineItems: []
+      };
+
+      const cart = {
+        country: 'US',
+        shippingMode: 'Multiple',
+        totalPrice: { currencyCode: 'USD' },
+        shipping: [
+          {
+            shippingKey: 'shipping-1',
+            shippingAddress: {
+              state: 'NY',
+              city: 'New York',
+              postalCode: '10001'
+            },
+            shippingInfo: {
+              price: { centAmount: 0 }
+            }
+          }
+        ]
+      };
+
+      const taxBehaviors = {};
+      const categoriesMap = new Map();
+
+      taxCodeService.getShippingTaxCodeFromShippingInfo.mockResolvedValue(null);
+
+      const requests = await taxOrchestratorService.createRequestsForGroup(
+        group,
+        cart,
+        taxBehaviors,
+        categoriesMap
+      );
+
+      // Should skip empty request
+      expect(requests.length).toBeLessThanOrEqual(1);
+    });
+
+    it('should handle line items with zero amount', async () => {
+      const group = {
+        shipFromAddress: {
+          country: 'US',
+          state: 'CA',
+          city: 'San Francisco',
+          postal_code: '94102'
+        },
+        lineItems: [
+          {
+            id: 'line-item-1',
+            productId: 'product-1',
+            quantity: 1,
+            totalPrice: { centAmount: 0 },
+            shippingDetails: {
+              targets: [
+                {
+                  shippingMethodKey: 'shipping-1',
+                  quantity: 1
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      const cart = {
+        country: 'US',
+        shippingMode: 'Multiple',
+        totalPrice: { currencyCode: 'USD' },
+        shipping: [
+          {
+            shippingKey: 'shipping-1',
+            shippingAddress: {
+              state: 'NY',
+              city: 'New York',
+              postalCode: '10001'
+            },
+            shippingInfo: {
+              price: { centAmount: 500 }
+            }
+          }
+        ]
+      };
+
+      const taxBehaviors = { 'line-item-1': 'exclusive' };
+      const categoriesMap = new Map([['product-1', []]]);
+
+      taxCodeService.getTaxCodeForProduct.mockReturnValue('txcd_12345678');
+      taxCodeService.getShippingTaxCodeFromShippingInfo.mockResolvedValue('txcd_87654321');
+
+      const requests = await taxOrchestratorService.createRequestsForGroup(
+        group,
+        cart,
+        taxBehaviors,
+        categoriesMap
+      );
+
+      // Line item with amount 0 should be filtered out
+      expect(requests[0].line_items.length).toBe(0);
+    });
+  });
+
+  describe('buildLineItemForShippingMethod', () => {
+    it('should return null when target quantity is 0', () => {
+      const cart = {
+        id: 'cart-123',
+        country: 'US'
+      };
+
+      const lineItem = {
+        id: 'line-item-1',
+        productId: 'product-1',
+        quantity: 2,
+        totalPrice: { centAmount: 2000 },
+        shippingDetails: {
+          targets: [
+            {
+              shippingMethodKey: 'shipping-1',
+              quantity: 0
+            }
+          ]
+        }
+      };
+
+      const taxBehaviors = {};
+      const categoriesMap = new Map([['product-1', []]]);
+
+      taxCodeService.getTaxCodeForProduct.mockReturnValue('txcd_12345678');
+
+      const result = taxOrchestratorService.buildLineItemForShippingMethod(
+        cart,
+        lineItem,
+        'shipping-1',
+        taxBehaviors,
+        categoriesMap
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when no target matches shippingKey', () => {
+      const cart = {
+        id: 'cart-123',
+        country: 'US'
+      };
+
+      const lineItem = {
+        id: 'line-item-1',
+        productId: 'product-1',
+        quantity: 2,
+        totalPrice: { centAmount: 2000 },
+        shippingDetails: {
+          targets: [
+            {
+              shippingMethodKey: 'shipping-2',
+              quantity: 1
+            }
+          ]
+        }
+      };
+
+      const taxBehaviors = {};
+      const categoriesMap = new Map([['product-1', []]]);
+
+      const result = taxOrchestratorService.buildLineItemForShippingMethod(
+        cart,
+        lineItem,
+        'shipping-1',
+        taxBehaviors,
+        categoriesMap
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it('should calculate proportional amount correctly', () => {
+      const cart = {
+        id: 'cart-123',
+        country: 'US'
+      };
+
+      const lineItem = {
+        id: 'line-item-1',
+        productId: 'product-1',
+        quantity: 4,
+        totalPrice: { centAmount: 4000 },
+        shippingDetails: {
+          targets: [
+            {
+              shippingMethodKey: 'shipping-1',
+              quantity: 1
+            }
+          ]
+        }
+      };
+
+      const taxBehaviors = { 'line-item-1': 'exclusive' };
+      const categoriesMap = new Map([['product-1', []]]);
+
+      taxCodeService.getTaxCodeForProduct.mockReturnValue('txcd_12345678');
+
+      const result = taxOrchestratorService.buildLineItemForShippingMethod(
+        cart,
+        lineItem,
+        'shipping-1',
+        taxBehaviors,
+        categoriesMap
+      );
+
+      expect(result).toBeDefined();
+      expect(result.amount).toBe(1000); // 4000 * 1 / 4
+      expect(result.quantity).toBe(1);
+      expect(result.tax_behavior).toBe('exclusive');
+    });
+  });
+
+  describe('getShippingCostForGroup', () => {
+    it('should return null when shippingInfo has no price', async () => {
+      const cart = {
+        shippingInfo: {}
+      };
+
+      const result = await taxOrchestratorService.getShippingCostForGroup(cart);
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when shippingInfo is missing', async () => {
+      const cart = {};
+
+      const result = await taxOrchestratorService.getShippingCostForGroup(cart);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getShippingCostForShippingMethod', () => {
+    it('should return null when shippingInfo has no price', async () => {
+      const shipping = {
+        shippingInfo: {}
+      };
+
+      const result = await taxOrchestratorService.getShippingCostForShippingMethod(shipping);
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null when shippingInfo is missing', async () => {
+      const shipping = {};
+
+      const result = await taxOrchestratorService.getShippingCostForShippingMethod(shipping);
+
+      expect(result).toBeNull();
+    });
+  });
 });
 

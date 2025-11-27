@@ -46,7 +46,7 @@ toCommerceToolsError() {
   // Add specific information based on shipping mode
   if (this.shippingMode === 'Single') {
     baseError.extensionExtraInfo.shippingMethodId = this.shippingMethodId;
-    baseError.extensionExtraInfo.shippingMethodName = this.shippingMethodObj?.name;
+    baseError.extensionExtraInfo.shippingMethodName = this.shippingMethodObj?.name || 'Unknown Shipping Method';
     baseError.extensionExtraInfo.shippingMethodTypeId = this.shippingMethodTypeId;
   } else {
     baseError.extensionExtraInfo.affectedShippingMethods = this.getAffectedShippingMethods();
