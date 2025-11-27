@@ -35,7 +35,7 @@ export function doValidation(messageBody) {
   const resourceTypeId = messageBody?.resource?.typeId;
   const resourceId = messageBody?.resource?.id;
 
-  if (resourceTypeId !== 'order' && !resourceId) {
+  if (resourceTypeId !== 'order' || !resourceId) {
     throw new CustomError(
       HTTP_STATUS_SUCCESS_ACCEPTED,
       ` No order ID is found in message.`

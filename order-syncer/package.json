@@ -10,8 +10,8 @@
     "lint": "eslint src --ext .js",
     "prettier": "prettier --write '**/*.{js,ts}'",
     "test": "npm run test:unit",
-    "test:integration": "jest --config test/integration/jest.config.cjs",
-    "test:unit": "jest --config test/unit/jest.config.cjs",
+    "test:unit": "jest --config jest.config.unit.cjs",
+    "test:integration": "jest --config jest.config.integration.js",
     "test:ci": "npm run test:unit && npm run test:integration",
     "connector:post-deploy": "node src/connectors/post-deploy.js",
     "connector:pre-undeploy": "node src/connectors/pre-undeploy.js"

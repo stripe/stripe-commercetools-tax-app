@@ -18,11 +18,6 @@ jest.mock('../../../src/utils/logger.utils.js', () => ({
   },
 }));
 
-jest.mock('lodash', () => ({
-  template: jest.fn(),
-  isEqual: jest.fn(),
-}));
-
 jest.mock('serialize-error', () => ({
   serializeError: jest.fn((err) => ({
     message: err.message,
@@ -58,7 +53,6 @@ jest.mock('../../../resources/api-extension.json', () => ({
 }), { virtual: true });
 
 import { logger } from '../../../src/utils/logger.utils.js';
-import _ from 'lodash';
 
 describe('action.js', () => {
   let mockApiRoot;
@@ -136,15 +130,6 @@ describe('action.js', () => {
     const extensionBaseUrl = 'https://example.com/webhook';
 
     it('should create a new extension when it does not exist', async () => {
-      const mockExtensionDraft = {
-        key: extensionKey,
-        destination: { type: 'HTTP', url: extensionBaseUrl },
-        triggers: [],
-      };
-
-      _.template.mockReturnValue(() => JSON.stringify(mockExtensionDraft));
-      JSON.parse = jest.fn(() => mockExtensionDraft);
-
       mockApiRoot._extensionsMock._mockGet.mockResolvedValue({
         body: { results: [] },
       });
@@ -159,7 +144,7 @@ describe('action.js', () => {
       );
     });
 
-    it('should update an existing extension when changes are detected', async () => {
+    it('should delete and recreate an existing extension when it exists', async () => {
       const existingExtension = {
         id: 'ext-123',
         version: 1,
@@ -167,32 +152,25 @@ describe('action.js', () => {
         triggers: [],
       };
 
-      const mockExtensionDraft = {
-        key: extensionKey,
-        destination: { type: 'HTTP', url: extensionBaseUrl },
-        triggers: [{ resourceTypeId: 'cart' }],
-      };
-
-      _.template.mockReturnValue(() => JSON.stringify(mockExtensionDraft));
-      JSON.parse = jest.fn(() => mockExtensionDraft);
-      _.isEqual
-        .mockReturnValueOnce(false) // destination changed
-        .mockReturnValueOnce(false); // triggers changed
-
       mockApiRoot._extensionsMock._mockGet.mockResolvedValue({
         body: { results: [existingExtension] },
       });
-      mockApiRoot._extensionsMock._mockWithIdPost.mockResolvedValue({});
+      mockApiRoot._extensionsMock._mockWithKeyDelete.mockResolvedValue({});
+      mockApiRoot._extensionsMock._mockPost.mockResolvedValue({});
 
       await createCTPExtension(mockApiRoot, extensionKey, extensionBaseUrl);
 
-      expect(mockApiRoot._extensionsMock._mockWithIdPost).toHaveBeenCalled();
+      expect(mockApiRoot._extensionsMock._mockWithKeyDelete).toHaveBeenCalled();
+      expect(mockApiRoot._extensionsMock._mockPost).toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Successfully updated the API extension')
+        expect.stringContaining('Deleted existing API extension')
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Successfully created an API extension')
       );
     });
 
-    it('should not update extension when no changes are detected', async () => {
+    it('should delete and recreate extension even when it matches existing configuration', async () => {
       const existingExtension = {
         id: 'ext-123',
         version: 1,
@@ -200,30 +178,26 @@ describe('action.js', () => {
         triggers: [],
       };
 
-      const mockExtensionDraft = {
-        destination: { type: 'HTTP', url: extensionBaseUrl },
-        triggers: [],
-      };
-
-      _.template.mockReturnValue(() => JSON.stringify(mockExtensionDraft));
-      JSON.parse = jest.fn(() => mockExtensionDraft);
-      _.isEqual.mockReturnValue(true); // no changes
-
       mockApiRoot._extensionsMock._mockGet.mockResolvedValue({
         body: { results: [existingExtension] },
       });
+      mockApiRoot._extensionsMock._mockWithKeyDelete.mockResolvedValue({});
+      mockApiRoot._extensionsMock._mockPost.mockResolvedValue({});
 
       await createCTPExtension(mockApiRoot, extensionKey, extensionBaseUrl);
 
+      expect(mockApiRoot._extensionsMock._mockWithKeyDelete).toHaveBeenCalled();
+      expect(mockApiRoot._extensionsMock._mockPost).toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('No update actions found')
+        expect.stringContaining('Deleted existing API extension')
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Successfully created an API extension')
       );
     });
 
     it('should throw error when extension creation fails', async () => {
       const error = new Error('API error');
-      _.template.mockReturnValue(() => '{}');
-      JSON.parse = jest.fn(() => ({}));
 
       mockApiRoot._extensionsMock._mockGet.mockRejectedValue(error);
 
