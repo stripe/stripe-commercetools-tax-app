@@ -20,8 +20,6 @@ import updateActionService from './update-action.service.js';
  * 7. Return the update actions
  */
 class TaxOrchestratorService {
-  constructor() {
-  }
 
   /**
    * Main orchestration method
@@ -275,7 +273,7 @@ class TaxOrchestratorService {
    * @param {Object} cart - Original cart
    * @param {Object} taxBehaviors - Tax behavior map for line items
    * @param {Object} categoriesMap - Map of categories for products
-   * @returns {Array} Array of Stripe request objects
+   * @returns {Promise<Array>} Array of Stripe request objects
    */
   async createSeparatedRequestsByShippingKey(group, cart, taxBehaviors, categoriesMap) {
     const requests = [];

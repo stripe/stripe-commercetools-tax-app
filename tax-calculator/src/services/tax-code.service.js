@@ -258,7 +258,7 @@ class TaxCodeService {
   /**
    * Get shipping tax code from shipping info
    * @param {Object} shippingInfo - Shipping info
-   * @returns {string|null} Shipping tax code or null if no tax code can be determined
+   * @returns {Promise<string|null>} Promise that resolves to shipping tax code or null if no tax code can be determined
    */
   async getShippingTaxCodeFromShippingInfo(shippingInfo) {
 

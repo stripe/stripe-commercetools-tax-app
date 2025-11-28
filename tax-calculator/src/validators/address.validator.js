@@ -23,9 +23,132 @@ const COUNTRY_ADDRESS_REQUIREMENTS = {
     }
 };
 
-export const validateAddress = (address) => {
+/**
+ * Validates required fields for an address
+ * @param {Object} address - The address object to validate
+ * @param {Object} requirements - The country-specific requirements
+ * @param {string} country - The country code
+ * @returns {Array} Array of validation errors
+ */
+const validateRequiredFields = (address, requirements, country) => {
+    const errors = [];
+    const requiredFields = requirements.required || [];
+
+    for (const field of requiredFields) {
+        const fieldValue = address[field];
+        if (!fieldValue || validator.isEmpty(fieldValue.toString().trim())) {
+            errors.push({
+                code: `MISSING_${field.toUpperCase()}`,
+                message: `${field} is required for ${country} tax calculation`
+            });
+        }
+    }
+
+    return errors;
+};
+
+/**
+ * Validates either/or required fields (e.g., postal_code OR state for India)
+ * @param {Object} address - The address object to validate
+ * @param {Object} requirements - The country-specific requirements
+ * @param {string} country - The country code
+ * @returns {Array} Array of validation errors
+ */
+const validateEitherRequiredFields = (address, requirements, country) => {
+    const errors = [];
+    
+    if (!requirements.either_required) {
+        return errors;
+    }
+
+    const hasAny = requirements.either_required.some(field => {
+        const fieldValue = address[field];
+        return fieldValue && !validator.isEmpty(fieldValue.toString().trim());
+    });
+
+    if (!hasAny) {
+        errors.push({
+            code: 'MISSING_REQUIRED_FIELD',
+            message: `One of the following is required for ${country}: ${requirements.either_required.join(', ')}`
+        });
+    }
+
+    return errors;
+};
+
+/**
+ * Validates postal code format if present
+ * @param {Object} address - The address object to validate
+ * @param {Object} requirements - The country-specific requirements
+ * @param {string} country - The country code
+ * @returns {Array} Array of validation errors
+ */
+const validatePostalCode = (address, requirements, country) => {
     const errors = [];
 
+    if (!address.postal_code || !requirements.postal_code_regex) {
+        return errors;
+    }
+
+    if (!requirements.postal_code_regex.test(address.postal_code)) {
+        errors.push({
+            code: 'INVALID_POSTAL_CODE',
+            message: `Invalid postal code format for ${country}`
+        });
+    }
+
+    return errors;
+};
+
+/**
+ * Validates state code if present
+ * @param {Object} address - The address object to validate
+ * @param {Object} requirements - The country-specific requirements
+ * @param {string} country - The country code
+ * @returns {Array} Array of validation errors
+ */
+const validateStateCode = (address, requirements, country) => {
+    const errors = [];
+
+    if (!address.state || !requirements.state_codes) {
+        return errors;
+    }
+
+    if (!requirements.state_codes.includes(address.state)) {
+        errors.push({
+            code: 'INVALID_STATE',
+            message: `Invalid state code for ${country}. Must be one of: ${requirements.state_codes.join(', ')}`
+        });
+    }
+
+    return errors;
+};
+
+/**
+ * Validates field length
+ * @param {string} fieldValue - The field value to validate
+ * @param {number} min - Minimum length
+ * @param {number} max - Maximum length
+ * @param {string} errorCode - Error code to use
+ * @param {string} errorMessage - Error message to use
+ * @returns {Object|null} Validation error object or null
+ */
+const validateFieldLength = (fieldValue, min, max, errorCode, errorMessage) => {
+    if (!fieldValue) {
+        return null;
+    }
+
+    if (!validator.isLength(fieldValue, { min, max })) {
+        return {
+            code: errorCode,
+            message: errorMessage
+        };
+    }
+
+    return null;
+};
+
+export const validateAddress = (address) => {
     if (!address || typeof address !== 'object') {
         return [{ code: 'INVALID_ADDRESS', message: 'Address must be a valid object' }];
     }
@@ -40,68 +163,42 @@ export const validateAddress = (address) => {
     }
 
     const requirements = COUNTRY_ADDRESS_REQUIREMENTS[country] || COUNTRY_ADDRESS_REQUIREMENTS.DEFAULT;
+    const errors = [];
 
-    // Check required fields
-    for (const field of requirements.required || []) {
-        if (!address[field] || validator.isEmpty(address[field].toString().trim())) {
-            errors.push({
-                code: `MISSING_${field.toUpperCase()}`,
-                message: `${field} is required for ${country} tax calculation`
-            });
-        }
+    // Validate required fields
+    errors.push(...validateRequiredFields(address, requirements, country));
+
+    // Validate either/or required fields
+    errors.push(...validateEitherRequiredFields(address, requirements, country));
+
+    // Validate postal code format
+    errors.push(...validatePostalCode(address, requirements, country));
+
+    // Validate state code
+    errors.push(...validateStateCode(address, requirements, country));
+
+    // Validate line1 length
+    const line1Error = validateFieldLength(
+        address.line1,
+        1,
+        200,
+        'INVALID_LINE1',
+        'Address line1 must be between 1 and 200 characters'
+    );
+    if (line1Error) {
+        errors.push(line1Error);
     }
 
-    // Check either/or required fields (for countries like India)
-    if (requirements.either_required) {
-        const hasAny = requirements.either_required.some(field =>
-            address[field] && !validator.isEmpty(address[field].toString().trim())
-        );
-        if (!hasAny) {
-            errors.push({
-                code: 'MISSING_REQUIRED_FIELD',
-                message: `One of the following is required for ${country}: ${requirements.either_required.join(', ')}`
-            });
-        }
-    }
-
-    // Validate postal code format if present
-    if (address.postal_code && requirements.postal_code_regex) {
-        if (!requirements.postal_code_regex.test(address.postal_code)) {
-            errors.push({
-                code: 'INVALID_POSTAL_CODE',
-                message: `Invalid postal code format for ${country}`
-            });
-        }
-    }
-
-    // Validate state codes if present and required
-    if (address.state && requirements.state_codes) {
-        if (!requirements.state_codes.includes(address.state)) {
-            errors.push({
-                code: 'INVALID_STATE',
-                message: `Invalid state code for ${country}. Must be one of: ${requirements.state_codes.join(', ')}`
-            });
-        }
-    }
-
-    // Validate line1 length if present
-    if (address.line1) {
-        if (!validator.isLength(address.line1, { min: 1, max: 200 })) {
-            errors.push({
-                code: 'INVALID_LINE1',
-                message: 'Address line1 must be between 1 and 200 characters'
-            });
-        }
-    }
-
-    // Validate city length if present
-    if (address.city) {
-        if (!validator.isLength(address.city, { min: 1, max: 100 })) {
-            errors.push({
-                code: 'INVALID_CITY',
-                message: 'City must be between 1 and 100 characters'
-            });
-        }
+    // Validate city length
+    const cityError = validateFieldLength(
+        address.city,
+        1,
+        100,
+        'INVALID_CITY',
+        'City must be between 1 and 100 characters'
+    );
+    if (cityError) {
+        errors.push(cityError);
     }
 
     return errors;

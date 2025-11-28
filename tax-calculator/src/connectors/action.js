@@ -124,6 +124,110 @@ export async function deleteCTPExtension(
 }
 
 /**
+ * Validate the structure of a mapping entry
+ * @param {Object} entry - The mapping entry to validate
+ * @param {number} index - The index of the entry in the array
+ * @returns {{id: string|undefined, key: string|undefined}} The validated category identifiers
+ * @throws {Error} If the entry structure is invalid
+ */
+function validateMappingEntry(entry, index) {
+  const { ctCategory } = entry;
+
+  if (!ctCategory || typeof ctCategory !== 'object') {
+    throw new Error(
+      `Invalid mapping at index ${index}: ctCategory must be an object`
+    );
+  }
+
+  const { id, key } = ctCategory;
+
+  if (!id && !key) {
+    throw new Error(
+      `Invalid mapping at index ${index}: ctCategory must have either "id" or "key"`
+    );
+  }
+
+  return { id, key };
+}
+
+/**
+ * Build a WHERE query clause for category lookup
+ * @param {string|undefined} id - Category ID
+ * @param {string|undefined} key - Category key
+ * @returns {string} The WHERE query string
+ */
+function buildCategoryWhereQuery(id, key) {
+  const whereClauses = [];
+  if (id) {
+    whereClauses.push(`id="${id}"`);
+  }
+  if (key) {
+    whereClauses.push(`key="${key}"`);
+  }
+  return whereClauses.join(' or ');
+}
+
+/**
+ * Format identifier description for error messages or logs
+ * @param {string|undefined} id - Category ID
+ * @param {string|undefined} key - Category key
+ * @param {'error'|'log'} format - Format type: 'error' uses "or", 'log' uses comma
+ * @returns {string} Formatted identifier description
+ */
+function formatIdentifierDescription(id, key, format = 'error') {
+  if (id && key) {
+    return format === 'error' 
+      ? `id="${id}" or key="${key}"` 
+      : `id="${id}", key="${key}"`;
+  }
+  if (id) {
+    return `id="${id}"`;
+  }
+  return `key="${key}"`;
+}
+
+/**
+ * Validate that a category exists in commercetools
+ * @param {Object} apiRoot - commercetools API client
+ * @param {string|undefined} id - Category ID
+ * @param {string|undefined} key - Category key
+ * @param {number} index - The index of the entry being validated
+ * @throws {Error} If the category doesn't exist or validation fails
+ */
+async function validateCategoryExists(apiRoot, id, key, index) {
+  const whereQuery = buildCategoryWhereQuery(id, key);
+
+  try {
+    const {
+      body: { results: categories },
+    } = await apiRoot
+      .categories()
+      .get({
+        queryArgs: {
+          where: whereQuery,
+          limit: 1,
+        },
+      })
+      .execute();
+
+    if (!categories || categories.length === 0) {
+      const identifierDesc = formatIdentifierDescription(id, key, 'error');
+      throw new Error(
+        `Category validation failed: Category with ${identifierDesc} does not exist in commercetools project. ` +
+          `Please ensure all categories in TAX_CODE_MAPPING_JSON exist before installing the connector.`
+      );
+    }
+  } catch (error) {
+    if (error.message.includes('Category validation failed')) {
+      throw error;
+    }
+    throw new Error(
+      `Failed to validate category mapping at index ${index}: ${error.message}`
+    );
+  }
+}
+
+/**
  * Validate that all categories in TAX_CODE_MAPPING_JSON exist in commercetools
  *
  * This validation ensures that the tax code mapping configuration is valid before
@@ -146,66 +250,13 @@ export async function validateTaxCodeMapping(apiRoot, mapping) {
   // Validate each category mapping
   for (let i = 0; i < mapping.categories.length; i++) {
     const entry = mapping.categories[i];
-    const { ctCategory } = entry;
+    const { id, key } = validateMappingEntry(entry, i);
 
-    if (!ctCategory || typeof ctCategory !== 'object') {
-      throw new Error(
-        `Invalid mapping at index ${i}: ctCategory must be an object`
-      );
-    }
+    await validateCategoryExists(apiRoot, id, key, i);
 
-    const { id, key } = ctCategory;
-
-    // Skip validation if both id and key are missing (this should have been caught by config validation)
-    if (!id && !key) {
-      throw new Error(
-        `Invalid mapping at index ${i}: ctCategory must have either "id" or "key"`
-      );
-    }
-
-    // Build query to check if category exists
-    const whereClauses = [];
-    if (id) {
-      whereClauses.push(`id="${id}"`);
-    }
-    if (key) {
-      whereClauses.push(`key="${key}"`);
-    }
-
-    const whereQuery = whereClauses.join(' or ');
-
-    try {
-      const {
-        body: { results: categories },
-      } = await apiRoot
-        .categories()
-        .get({
-          queryArgs: {
-            where: whereQuery,
-            limit: 1,
-          },
-        })
-        .execute();
-
-      if (!categories || categories.length === 0) {
-        const identifierDesc = id && key ? `id="${id}" or key="${key}"` : id ? `id="${id}"` : `key="${key}"`;
-        throw new Error(
-          `Category validation failed: Category with ${identifierDesc} does not exist in commercetools project. ` +
-            `Please ensure all categories in TAX_CODE_MAPPING_JSON exist before installing the connector.`
-        );
-      }
-
-      // Log successful validation
-      const identifierDesc = id && key ? `id="${id}", key="${key}"` : id ? `id="${id}"` : `key="${key}"`;
-      logger.info(`Category validated: ${identifierDesc} -> ${entry.taxCode}`);
-    } catch (error) {
-      if (error.message.includes('Category validation failed')) {
-        throw error;
-      }
-      throw new Error(
-        `Failed to validate category mapping at index ${i}: ${error.message}`
-      );
-    }
+    // Log successful validation
+    const identifierDesc = formatIdentifierDescription(id, key, 'log');
+    logger.info(`Category validated: ${identifierDesc} -> ${entry.taxCode}`);
   }
 
   logger.info(`All ${mapping.categories.length} category mappings validated successfully`);

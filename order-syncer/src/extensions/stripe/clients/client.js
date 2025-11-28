@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { loadConfig } from '../configurations/config.js';
 import { ORDER_TAX_FIELD_NAMES } from '../../../connectors/customTypes.js';
 
-var stripeClient;
+let stripeClient;
 
 /**
  * Create a new Stripe client.
