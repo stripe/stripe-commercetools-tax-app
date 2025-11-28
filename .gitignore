@@ -34,6 +34,9 @@ order-syncer/.env
 tax-calculator/coverage/
 order-syncer/coverage/
 
+# commercetools connect
+.connect/
+
 # AI Generated Files
 .claude
 CLAUDE.md

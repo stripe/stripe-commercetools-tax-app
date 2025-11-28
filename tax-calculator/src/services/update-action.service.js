@@ -80,78 +80,114 @@ class UpdateActionService {
    * @returns {Object} Combined calculation object (for custom type only)
    */
   combineCalculations(calculations) {
-    const allLineItems = [];
-    const allTaxBreakdowns = [];
-    const allShippingTaxBreakdowns = [];
-    const calculationReferences = [];
-    const currencies = [];
-    const expiresAt = [];
-    
-    let amountTotal = 0;
-    let taxAmountExclusive = 0;
-    let taxAmountInclusive = 0;
-    let shippingAmount = 0;
-    let shippingAmountTax = 0;
-    let firstCurrency = null;
+    // Initialize accumulator object
+    const accumulator = {
+      allLineItems: [],
+      allTaxBreakdowns: [],
+      allShippingTaxBreakdowns: [],
+      calculationReferences: [],
+      currencies: [],
+      expiresAt: [],
+      amountTotal: 0,
+      taxAmountExclusive: 0,
+      taxAmountInclusive: 0,
+      shippingAmount: 0,
+      shippingAmountTax: 0,
+      firstCurrency: null
+    };
     
     // Single pass through all calculations
     for (const calc of calculations) {
-      // Accumulate line items
-      if (calc.line_items?.data) {
-        allLineItems.push(...calc.line_items.data);
-      }
+      // Process arrays and breakdowns (line items, tax breakdowns)
+      this.processArraysAndBreakdowns(calc, accumulator);
       
-      // Accumulate tax breakdowns
-      if (calc.tax_breakdown) {
-        allTaxBreakdowns.push(...calc.tax_breakdown);
-      }
-      
-      // Accumulate shipping tax breakdowns
-      if (calc.shipping_cost?.tax_breakdown) {
-        allShippingTaxBreakdowns.push(...calc.shipping_cost.tax_breakdown);
-      }
-      
-      // Accumulate amounts
-      amountTotal += calc.amount_total || 0;
-      taxAmountExclusive += calc.tax_amount_exclusive || 0;
-      taxAmountInclusive += calc.tax_amount_inclusive || 0;
-      shippingAmount += calc.shipping_cost?.amount || 0;
-      shippingAmountTax += calc.shipping_cost?.amount_tax || 0;
-      
-      // Collect references and metadata
-      if (calc.id) {
-        calculationReferences.push(calc.id);
-        currencies.push(`${calc.id}_${(calc.currency || 'USD').toUpperCase()}`);
-      }
-      
-      if (calc.expires_at) {
-        expiresAt.push(`${calc.id}_${new Date(calc.expires_at * 1000).toISOString()}`);
-      }
-      
-      // Capture first currency
-      if (!firstCurrency && calc.currency) {
-        firstCurrency = calc.currency;
-      }
+      // Process amounts and metadata (amounts, references, currencies, expires_at, firstCurrency)
+      this.processAmountsAndMetadata(calc, accumulator);
     }
     
-    const combined = {
-      calculation_references: calculationReferences,
-      amount_total: amountTotal,
-      tax_amount_exclusive: taxAmountExclusive,
-      tax_amount_inclusive: taxAmountInclusive,
-      currency: firstCurrency || 'USD',
-      currencies: currencies,
-      line_items: { data: allLineItems },
-      expires_at: expiresAt,
-      tax_breakdown: allTaxBreakdowns,
+    // Build and return combined result
+    return this.buildCombinedResult(accumulator);
+  }
+
+  /**
+   * Process arrays and tax breakdowns from a calculation
+   * Accumulates line items, tax breakdowns, and shipping tax breakdowns
+   * @param {Object} calc - Stripe calculation response
+   * @param {Object} accumulator - Accumulator object to store results
+   * @private
+   */
+  processArraysAndBreakdowns(calc, accumulator) {
+    // Accumulate line items
+    if (calc.line_items?.data) {
+      accumulator.allLineItems.push(...calc.line_items.data);
+    }
+    
+    // Accumulate tax breakdowns
+    if (calc.tax_breakdown) {
+      accumulator.allTaxBreakdowns.push(...calc.tax_breakdown);
+    }
+    
+    // Accumulate shipping tax breakdowns
+    if (calc.shipping_cost?.tax_breakdown) {
+      accumulator.allShippingTaxBreakdowns.push(...calc.shipping_cost.tax_breakdown);
+    }
+  }
+
+  /**
+   * Process amounts and metadata from a calculation
+   * Accumulates amounts, calculation references, currencies, expires_at, and captures first currency
+   * @param {Object} calc - Stripe calculation response
+   * @param {Object} accumulator - Accumulator object to store results
+   * @private
+   */
+  processAmountsAndMetadata(calc, accumulator) {
+    // Accumulate amounts (always accumulate, using || 0 for missing values)
+    accumulator.amountTotal += calc.amount_total || 0;
+    accumulator.taxAmountExclusive += calc.tax_amount_exclusive || 0;
+    accumulator.taxAmountInclusive += calc.tax_amount_inclusive || 0;
+    accumulator.shippingAmount += calc.shipping_cost?.amount || 0;
+    accumulator.shippingAmountTax += calc.shipping_cost?.amount_tax || 0;
+    
+    // Collect references and metadata
+    if (calc.id) {
+      accumulator.calculationReferences.push(calc.id);
+      accumulator.currencies.push(`${calc.id}_${(calc.currency || 'USD').toUpperCase()}`);
+    }
+    
+    if (calc.expires_at) {
+      accumulator.expiresAt.push(`${calc.id}_${new Date(calc.expires_at * 1000).toISOString()}`);
+    }
+    
+    // Capture first currency
+    if (!accumulator.firstCurrency && calc.currency) {
+      accumulator.firstCurrency = calc.currency;
+    }
+  }
+
+  /**
+   * Build combined calculation result from accumulator
+   * Constructs the final combined calculation object with all accumulated data
+   * @param {Object} accumulator - Accumulator object with all processed data
+   * @returns {Object} Combined calculation object
+   * @private
+   */
+  buildCombinedResult(accumulator) {
+    return {
+      calculation_references: accumulator.calculationReferences,
+      amount_total: accumulator.amountTotal,
+      tax_amount_exclusive: accumulator.taxAmountExclusive,
+      tax_amount_inclusive: accumulator.taxAmountInclusive,
+      currency: accumulator.firstCurrency || 'USD',
+      currencies: accumulator.currencies,
+      line_items: { data: accumulator.allLineItems },
+      expires_at: accumulator.expiresAt,
+      tax_breakdown: accumulator.allTaxBreakdowns,
       shipping_cost: {
-        amount: shippingAmount,
-        amount_tax: shippingAmountTax,
-        tax_breakdown: allShippingTaxBreakdowns
+        amount: accumulator.shippingAmount,
+        amount_tax: accumulator.shippingAmountTax,
+        tax_breakdown: accumulator.allShippingTaxBreakdowns
       }
     };
-    
-    return combined;
   }
 
   /**
@@ -246,26 +282,44 @@ class UpdateActionService {
    * @returns {Array} Array of setLineItemTaxAmount update actions
    */
   createLineItemTaxUpdateActions(calculations, shippingInfoGroups = [], lineItemTotalPriceActions = [], cart = null) {
-    const actions = [];
-    
     // Map calculations to their shippingKeys
     const calculationToShippingKey = this.mapCalculationsToShippingKeys(calculations, shippingInfoGroups);
     
-    // Process each calculation individually
+    // Build initial actions from calculations
+    const actions = [];
     for (const calculation of calculations) {
       const shippingKey = calculationToShippingKey.get(calculation.id) || null;
-      
-      // Create actions for line items in this calculation
       const calculationActions = this.createLineItemActionsFromCalculation(
         calculation,
         shippingKey, // null for Single mode, shippingKey for Multiple mode
         cart // Pass cart for fallback country
       );
-      
       actions.push(...calculationActions);
     }
     
-    // Handle duplicates: if same (lineItemId + shippingKey) appears in multiple calculations
+    // Merge duplicate actions (same lineItemId + shippingKey from multiple calculations)
+    const actionsByKey = this.mergeDuplicateTaxActions(actions);
+    
+    // CRITICAL: Ensure all line items with setLineItemTotalPrice also have setLineItemTaxAmount
+    // This is required because setLineItemTotalPrice changes priceMode to ExternalTotal,
+    // and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set
+    this.ensureMissingTaxActions(actionsByKey, lineItemTotalPriceActions, cart);
+    
+    // Remove temporary fields and return final actions
+    const finalActions = this.removeTemporaryTaxFields(actionsByKey);
+    
+    logger.info(`Created ${finalActions.length} line item tax update actions`);
+    return finalActions;
+  }
+
+  /**
+   * Merge duplicate tax actions when same (lineItemId + shippingKey) appears in multiple calculations
+   * Combines totalGross amounts and calculates effective tax rate based on combined base amounts
+   * @param {Array} actions - Array of tax actions that may contain duplicates
+   * @returns {Map} Map of merged actions keyed by lineItemId-shippingKey
+   * @private
+   */
+  mergeDuplicateTaxActions(actions) {
     const actionsByKey = new Map();
     const baseAmountsByKey = new Map();
     
@@ -289,16 +343,15 @@ class UpdateActionService {
         const newTax = action.externalTaxAmount.totalGross.centAmount - newBase;
         const combinedTax = existingTax + newTax;
         
-        let effectiveRate;
-        if (totalBase > 0) {
-          effectiveRate = combinedTax / totalBase; // Precise effective rate
-        } else {
-          // Fallback: average of rates (reverse calculate from rates)
-          const existingRate = existing.externalTaxAmount.taxRate.amount;
-          const newRate = action.externalTaxAmount.taxRate.amount;
-          effectiveRate = (existingRate + newRate) / 2;
-        }
+        // Calculate effective tax rate
+        const effectiveRate = this.calculateEffectiveTaxRate(
+          totalBase,
+          combinedTax,
+          existing.externalTaxAmount.taxRate.amount,
+          action.externalTaxAmount.taxRate.amount
+        );
         
+        // Update existing action with combined values
         existing.externalTaxAmount.totalGross.centAmount = combinedTotalGross;
         existing.externalTaxAmount.taxRate.amount = effectiveRate;
         baseAmountsByKey.set(key, totalBase);
@@ -309,9 +362,38 @@ class UpdateActionService {
       }
     }
     
-    // CRITICAL: Ensure all line items with setLineItemTotalPrice also have setLineItemTaxAmount
-    // This is required because setLineItemTotalPrice changes priceMode to ExternalTotal,
-    // and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set
+    return actionsByKey;
+  }
+
+  /**
+   * Calculate effective tax rate from combined amounts or fallback to average of rates
+   * @param {number} totalBase - Combined base amount
+   * @param {number} combinedTax - Combined tax amount
+   * @param {number} existingRate - Existing tax rate
+   * @param {number} newRate - New tax rate
+   * @returns {number} Effective tax rate
+   * @private
+   */
+  calculateEffectiveTaxRate(totalBase, combinedTax, existingRate, newRate) {
+    if (totalBase > 0) {
+      return combinedTax / totalBase; // Precise effective rate
+    } else {
+      // Fallback: average of rates (reverse calculate from rates)
+      return (existingRate + newRate) / 2;
+    }
+  }
+
+  /**
+   * Ensure all line items with setLineItemTotalPrice also have setLineItemTaxAmount
+   * Creates tax actions with tax = 0 for line items that have totalPrice but no tax calculation
+   * This is required because setLineItemTotalPrice changes priceMode to ExternalTotal,
+   * and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set
+   * @param {Map} actionsByKey - Map of tax actions keyed by lineItemId-shippingKey
+   * @param {Array} lineItemTotalPriceActions - Array of setLineItemTotalPrice actions
+   * @param {Object} cart - Commercetools cart (optional, for fallback values)
+   * @private
+   */
+  ensureMissingTaxActions(actionsByKey, lineItemTotalPriceActions, cart) {
     const defaultCountry = cart?.country || cart?.shippingAddress?.country || 'US';
     const defaultCurrency = cart?.totalPrice?.currencyCode || 'USD';
     
@@ -324,44 +406,65 @@ class UpdateActionService {
         // Create a tax action with tax = 0 to satisfy CommerceTools requirement
         logger.warn(`Line item ${totalPriceAction.lineItemId} has setLineItemTotalPrice but no tax calculation. Creating tax action with tax = 0`);
         
-        const currencyCode = totalPriceAction.externalTotalPrice?.totalPrice?.currencyCode || 
-                            totalPriceAction.externalTotalPrice?.price?.currencyCode || 
-                            defaultCurrency;
-        const totalPrice = totalPriceAction.externalTotalPrice?.totalPrice?.centAmount || 0;
-        
-        const missingTaxAction = {
-          action: "setLineItemTaxAmount",
-          lineItemId: totalPriceAction.lineItemId,
-          externalTaxAmount: {
-            totalGross: {
-              currencyCode: currencyCode,
-              centAmount: totalPrice // Use totalPrice as totalGross (tax = 0)
-            },
-            taxRate: {
-              name: 'no_tax',
-              amount: 0,
-              country: defaultCountry
-            }
-          }
-        };
-        
-        // Add shippingKey if present in totalPriceAction
-        if (totalPriceAction.shippingKey) {
-          missingTaxAction.shippingKey = totalPriceAction.shippingKey;
-        }
-        
+        const missingTaxAction = this.createMissingTaxAction(totalPriceAction, defaultCountry, defaultCurrency);
         actionsByKey.set(key, missingTaxAction);
       }
     }
+  }
+
+  /**
+   * Create a tax action with tax = 0 for a line item that has totalPrice but no tax calculation
+   * @param {Object} totalPriceAction - setLineItemTotalPrice action
+   * @param {string} defaultCountry - Default country code
+   * @param {string} defaultCurrency - Default currency code
+   * @returns {Object} setLineItemTaxAmount action with tax = 0
+   * @private
+   */
+  createMissingTaxAction(totalPriceAction, defaultCountry, defaultCurrency) {
+    const currencyCode = totalPriceAction.externalTotalPrice?.totalPrice?.currencyCode || 
+                        totalPriceAction.externalTotalPrice?.price?.currencyCode || 
+                        defaultCurrency;
+    const totalPrice = totalPriceAction.externalTotalPrice?.totalPrice?.centAmount || 0;
     
-    // Remove temporary _baseAmount field before returning
+    const missingTaxAction = {
+      action: "setLineItemTaxAmount",
+      lineItemId: totalPriceAction.lineItemId,
+      externalTaxAmount: {
+        totalGross: {
+          currencyCode: currencyCode,
+          centAmount: totalPrice // Use totalPrice as totalGross (tax = 0)
+        },
+        taxRate: {
+          name: 'no_tax',
+          amount: 0,
+          country: defaultCountry
+        }
+      }
+    };
+    
+    // Add shippingKey if present in totalPriceAction
+    if (totalPriceAction.shippingKey) {
+      missingTaxAction.shippingKey = totalPriceAction.shippingKey;
+    }
+    
+    return missingTaxAction;
+  }
+
+  /**
+   * Remove temporary fields from actions and convert Map to Array
+   * Removes the _baseAmount field that was used for effective rate calculation
+   * @param {Map} actionsByKey - Map of actions keyed by lineItemId-shippingKey
+   * @returns {Array} Array of final actions without temporary fields
+   * @private
+   */
+  removeTemporaryTaxFields(actionsByKey) {
     const finalActions = [];
+    
     for (const action of actionsByKey.values()) {
       delete action._baseAmount;
       finalActions.push(action);
     }
     
-    logger.info(`Created ${finalActions.length} line item tax update actions`);
     return finalActions;
   }
 
@@ -374,77 +477,146 @@ class UpdateActionService {
    * @returns {Array} Array of setLineItemTotalPrice update actions
    */
   createLineItemTotalPriceActions(calculations, shippingInfoGroups = []) {
-    const actions = [];
-    
     // Map calculations to their shippingKeys (reusing shared method)
     const calculationToShippingKey = this.mapCalculationsToShippingKeys(calculations, shippingInfoGroups);
     
-    // Process each calculation
+    // Build initial actions from calculations
+    const actions = this.buildActionsFromCalculations(calculations, calculationToShippingKey);
+    
+    // Merge duplicate actions (same lineItemId + shippingKey)
+    const mergedActions = this.mergeDuplicateActions(actions);
+    
+    // Remove temporary fields and return final actions
+    const finalActions = this.removeTemporaryFields(mergedActions);
+    
+    logger.info(`Created ${finalActions.length} line item total price update actions`);
+    return finalActions;
+  }
+
+  /**
+   * Build line item total price actions from calculations
+   * Creates one action per line item in each calculation
+   * @param {Array} calculations - Array of Stripe calculation responses
+   * @param {Map} calculationToShippingKey - Map of calculation IDs to shipping keys
+   * @returns {Array} Array of setLineItemTotalPrice actions (may contain duplicates)
+   * @private
+   */
+  buildActionsFromCalculations(calculations, calculationToShippingKey) {
+    const actions = [];
+    
     for (const calculation of calculations) {
       const shippingKey = calculationToShippingKey.get(calculation.id) || null;
       const lineItems = calculation.line_items?.data || [];
       
       for (const lineItemData of lineItems) {
-        // Set totalPrice to base amount (without taxes)
-        // CommerceTools will set totalNet = totalPrice, and totalTax will be calculated as totalGross - totalNet
-        const totalPriceBase = lineItemData.amount;
-        const quantity = lineItemData.quantity || 1;
-        
-        const action = {
-          action: "setLineItemTotalPrice",
-          lineItemId: lineItemData.reference,
-          externalTotalPrice: {
-            price: {
-              currencyCode: calculation.currency?.toUpperCase() || 'USD',
-              centAmount: quantity > 0 ? Math.round(lineItemData.amount / quantity) : lineItemData.amount // Unit price
-            },
-            totalPrice: {
-              currencyCode: calculation.currency?.toUpperCase() || 'USD',
-              centAmount: totalPriceBase // Total price without taxes (base amount)
-            }
-          },
-          _quantity: quantity // Store for duplicate handling
-        };
-        
-        // Add shippingKey if available (Multiple mode)
-        if (shippingKey) {
-          action.shippingKey = shippingKey;
-        }
-        
+        const action = this.createLineItemTotalPriceAction(lineItemData, calculation, shippingKey);
         actions.push(action);
       }
     }
     
-    // Handle duplicates: if same (lineItemId + shippingKey) appears in multiple calculations
+    return actions;
+  }
+
+  /**
+   * Create a single line item total price action
+   * Sets totalPrice to base amount (without taxes) and calculates unit price
+   * @param {Object} lineItemData - Line item data from Stripe calculation
+   * @param {Object} calculation - Stripe calculation response
+   * @param {string|null} shippingKey - Shipping method key (null for Single mode)
+   * @returns {Object} setLineItemTotalPrice action with temporary _quantity field
+   * @private
+   */
+  createLineItemTotalPriceAction(lineItemData, calculation, shippingKey) {
+    // Set totalPrice to base amount (without taxes)
+    // CommerceTools will set totalNet = totalPrice, and totalTax will be calculated as totalGross - totalNet
+    const totalPriceBase = lineItemData.amount;
+    const quantity = lineItemData.quantity || 1;
+    const currencyCode = calculation.currency?.toUpperCase() || 'USD';
+    const unitPrice = quantity > 0 ? Math.round(lineItemData.amount / quantity) : lineItemData.amount;
+    
+    const action = {
+      action: "setLineItemTotalPrice",
+      lineItemId: lineItemData.reference,
+      externalTotalPrice: {
+        price: {
+          currencyCode: currencyCode,
+          centAmount: unitPrice
+        },
+        totalPrice: {
+          currencyCode: currencyCode,
+          centAmount: totalPriceBase
+        }
+      },
+      _quantity: quantity // Store for duplicate handling
+    };
+    
+    // Add shippingKey if available (Multiple mode)
+    if (shippingKey) {
+      action.shippingKey = shippingKey;
+    }
+    
+    return action;
+  }
+
+  /**
+   * Merge duplicate actions when same (lineItemId + shippingKey) appears in multiple calculations
+   * Combines totalPrice amounts and recalculates unit price based on combined quantity
+   * @param {Array} actions - Array of actions that may contain duplicates
+   * @returns {Map} Map of merged actions keyed by lineItemId-shippingKey
+   * @private
+   */
+  mergeDuplicateActions(actions) {
     const actionsByKey = new Map();
+    
     for (const action of actions) {
       const key = `${action.lineItemId}-${action.shippingKey || 'single'}`;
       
       if (actionsByKey.has(key)) {
-        // Combine totalPrice amounts
-        const existing = actionsByKey.get(key);
-        const combinedTotalPrice = existing.externalTotalPrice.totalPrice.centAmount + 
-                                  action.externalTotalPrice.totalPrice.centAmount;
-        const combinedQuantity = existing._quantity + (action._quantity || 1);
-        
-        existing.externalTotalPrice.totalPrice.centAmount = combinedTotalPrice;
-        existing.externalTotalPrice.price.centAmount = combinedQuantity > 0 
-          ? Math.round(combinedTotalPrice / combinedQuantity) 
-          : combinedTotalPrice;
-        existing._quantity = combinedQuantity;
+        this.combineActionWithExisting(action, actionsByKey.get(key));
       } else {
         actionsByKey.set(key, { ...action });
       }
     }
     
-    // Remove temporary _quantity field before returning
+    return actionsByKey;
+  }
+
+  /**
+   * Combine a new action with an existing action
+   * Merges totalPrice amounts and recalculates unit price
+   * @param {Object} newAction - New action to combine
+   * @param {Object} existingAction - Existing action to update
+   * @private
+   */
+  combineActionWithExisting(newAction, existingAction) {
+    // Combine totalPrice amounts
+    const combinedTotalPrice = existingAction.externalTotalPrice.totalPrice.centAmount + 
+                              newAction.externalTotalPrice.totalPrice.centAmount;
+    const combinedQuantity = existingAction._quantity + (newAction._quantity || 1);
+    
+    // Update existing action with combined values
+    existingAction.externalTotalPrice.totalPrice.centAmount = combinedTotalPrice;
+    existingAction.externalTotalPrice.price.centAmount = combinedQuantity > 0 
+      ? Math.round(combinedTotalPrice / combinedQuantity) 
+      : combinedTotalPrice;
+    existingAction._quantity = combinedQuantity;
+  }
+
+  /**
+   * Remove temporary fields from actions and convert Map to Array
+   * Removes the _quantity field that was used for duplicate handling
+   * @param {Map} actionsByKey - Map of actions keyed by lineItemId-shippingKey
+   * @returns {Array} Array of final actions without temporary fields
+   * @private
+   */
+  removeTemporaryFields(actionsByKey) {
     const finalActions = [];
+    
     for (const action of actionsByKey.values()) {
       delete action._quantity;
       finalActions.push(action);
     }
     
-    logger.info(`Created ${finalActions.length} line item total price update actions`);
     return finalActions;
   }
 
@@ -541,7 +713,26 @@ class UpdateActionService {
     }
     
     // Precompute tax rates and create lookup maps
-    const breakdownsWithRates = taxBreakdowns.map(breakdown => {
+    const breakdownsWithRates = this.precomputeBreakdownsWithRates(taxBreakdowns);
+    
+    // STRATEGY 1: Search for tax breakdown by calculated tax amount (using precomputed rates)
+    const breakdown = this.findBreakdownByCalculatedTax(lineItemTaxData, breakdownsWithRates);
+    if (breakdown) {
+      return breakdown;
+    }
+    
+    // STRATEGY 2: Search for tax breakdown by most common tax type (using precomputed data)
+    return this.findBreakdownByMostCommonTaxType(breakdownsWithRates);
+  }
+
+  /**
+   * Precompute tax rates from tax breakdowns and filter out invalid entries
+   * @param {Array} taxBreakdowns - Array of tax breakdowns
+   * @returns {Array} Array of objects with breakdown, taxRate, and taxType
+   * @private
+   */
+  precomputeBreakdownsWithRates(taxBreakdowns) {
+    return taxBreakdowns.map(breakdown => {
       const percentageDecimal = breakdown.tax_rate_details?.percentage_decimal;
       const taxRate = percentageDecimal ? parseFloat(percentageDecimal) / 100 : null;
       return {
@@ -550,19 +741,34 @@ class UpdateActionService {
         taxType: breakdown.tax_rate_details?.tax_type
       };
     }).filter(b => b.taxRate !== null);
-    
-    // STRATEGY 1: Search for tax breakdown by calculated tax amount (using precomputed rates)
+  }
+
+  /**
+   * Find tax breakdown by matching calculated tax amount
+   * Uses the precomputed tax rates to calculate expected tax and matches against actual tax
+   * @param {Object} lineItemTaxData - Line item tax data with amount and amount_tax
+   * @param {Array} breakdownsWithRates - Precomputed breakdowns with tax rates
+   * @returns {Object|null} Matching tax breakdown or null
+   * @private
+   */
+  findBreakdownByCalculatedTax(lineItemTaxData, breakdownsWithRates) {
     const actualTax = lineItemTaxData.amount_tax;
     const breakdown = breakdownsWithRates.find(({ taxRate }) => {
       const expectedTax = Math.round(lineItemTaxData.amount * taxRate);
       return Math.abs(expectedTax - actualTax) <= 1;
     });
     
-    if (breakdown) {
-      return breakdown.breakdown;
-    }
-    
-    // STRATEGY 2: Search for tax breakdown by most common tax type (using precomputed data)
+    return breakdown ? breakdown.breakdown : null;
+  }
+
+  /**
+   * Find tax breakdown by most common tax type
+   * Counts occurrences of each tax type and returns breakdown for the most common one
+   * @param {Array} breakdownsWithRates - Precomputed breakdowns with tax rates and types
+   * @returns {Object|null} Tax breakdown for most common tax type or null
+   * @private
+   */
+  findBreakdownByMostCommonTaxType(breakdownsWithRates) {
     const taxTypeCounts = new Map();
     breakdownsWithRates.forEach(({ taxType }) => {
       if (taxType) {
@@ -570,23 +776,21 @@ class UpdateActionService {
       }
     });
     
-    if (taxTypeCounts.size > 0) {
-      let mostCommonTaxType = null;
-      let maxCount = 0;
-      for (const [taxType, count] of taxTypeCounts.entries()) {
-        if (count > maxCount) {
-          maxCount = count;
-          mostCommonTaxType = taxType;
-        }
-      }
-      
-      const result = breakdownsWithRates.find(({ taxType }) => taxType === mostCommonTaxType);
-      if (result) {
-        return result.breakdown;
+    if (taxTypeCounts.size === 0) {
+      return null;
+    }
+    
+    let mostCommonTaxType = null;
+    let maxCount = 0;
+    for (const [taxType, count] of taxTypeCounts.entries()) {
+      if (count > maxCount) {
+        maxCount = count;
+        mostCommonTaxType = taxType;
       }
     }
     
-    return null;
+    const result = breakdownsWithRates.find(({ taxType }) => taxType === mostCommonTaxType);
+    return result ? result.breakdown : null;
   }
 
   /**
@@ -595,30 +799,77 @@ class UpdateActionService {
    * @param {Object} calculation - New calculation to combine
    */
   combineShippingCosts(existing, calculation) {
-    if (calculation.shipping_cost && existing.calculation.shipping_cost) {
-      existing.calculation.shipping_cost.amount = 
-        (existing.calculation.shipping_cost.amount || 0) + 
-        (calculation.shipping_cost.amount || 0);
-      existing.calculation.shipping_cost.amount_tax = 
-        (existing.calculation.shipping_cost.amount_tax || 0) + 
-        (calculation.shipping_cost.amount_tax || 0);
-      
-      if (calculation.shipping_cost.tax_breakdown && existing.calculation.shipping_cost.tax_breakdown) {
-        existing.calculation.shipping_cost.tax_breakdown = [
-          ...(existing.calculation.shipping_cost.tax_breakdown || []),
-          ...(calculation.shipping_cost.tax_breakdown || [])
-        ];
-      }
-    } else if (calculation.shipping_cost && !existing.calculation.shipping_cost) {
-      existing.calculation.shipping_cost = calculation.shipping_cost;
+    // Process shipping_cost (combine or assign)
+    this.processShippingCost(existing, calculation);
+    
+    // Combine general tax_breakdown (independent of shipping_cost)
+    this.combineTaxBreakdowns(existing, calculation);
+  }
+
+  /**
+   * Process shipping_cost from calculation into existing calculation
+   * @param {Object} existing - Existing calculation data
+   * @param {Object} calculation - New calculation to process
+   * @private
+   */
+  processShippingCost(existing, calculation) {
+    // Early return if calculation has no shipping_cost
+    if (!calculation.shipping_cost) {
+      return;
     }
     
-    if (calculation.tax_breakdown && existing.calculation.tax_breakdown) {
-      existing.calculation.tax_breakdown = [
-        ...(existing.calculation.tax_breakdown || []),
-        ...(calculation.tax_breakdown || [])
-      ];
+    // If existing has no shipping_cost, assign directly from calculation
+    if (!existing.calculation.shipping_cost) {
+      existing.calculation.shipping_cost = calculation.shipping_cost;
+      return;
     }
+    
+    // Both have shipping_cost: combine amounts
+    existing.calculation.shipping_cost.amount = 
+      (existing.calculation.shipping_cost.amount || 0) + 
+      (calculation.shipping_cost.amount || 0);
+    existing.calculation.shipping_cost.amount_tax = 
+      (existing.calculation.shipping_cost.amount_tax || 0) + 
+      (calculation.shipping_cost.amount_tax || 0);
+    
+    // Combine tax_breakdown arrays from shipping_cost if both exist
+    if (calculation.shipping_cost.tax_breakdown && existing.calculation.shipping_cost.tax_breakdown) {
+      existing.calculation.shipping_cost.tax_breakdown = this.combineArrays(
+        existing.calculation.shipping_cost.tax_breakdown,
+        calculation.shipping_cost.tax_breakdown
+      );
+    }
+  }
+
+  /**
+   * Combine general tax_breakdown arrays from calculation into existing calculation
+   * Merges tax_breakdown arrays when both calculation and existing have them.
+   * This is independent of shipping_cost processing and always executes.
+   * @param {Object} existing - Existing calculation data
+   * @param {Object} calculation - New calculation with tax_breakdown to combine
+   * @private
+   */
+  combineTaxBreakdowns(existing, calculation) {
+    if (calculation.tax_breakdown && existing.calculation.tax_breakdown) {
+      existing.calculation.tax_breakdown = this.combineArrays(
+        existing.calculation.tax_breakdown,
+        calculation.tax_breakdown
+      );
+    }
+  }
+
+  /**
+   * Combine two arrays into a single array, handling null/undefined values
+   * @param {Array} array1 - First array to combine (can be null/undefined)
+   * @param {Array} array2 - Second array to combine (can be null/undefined)
+   * @returns {Array} Combined array containing all elements from both arrays
+   * @private
+   */
+  combineArrays(array1, array2) {
+    return [
+      ...(array1 || []),
+      ...(array2 || [])
+    ];
   }
 
   /**
@@ -678,45 +929,91 @@ class UpdateActionService {
     const calculationByShippingKey = new Map();
     
     if (requests && requests.length > 0) {
-      for (let i = 0; i < Math.min(calculations.length, requests.length); i++) {
-        const request = requests[i];
-        const calculation = calculations[i];
-        
-        if (request?.shippingKey && calculation) {
-          const shippingKey = request.shippingKey;
-          
-          if (calculationByShippingKey.has(shippingKey)) {
-            this.combineShippingCosts(calculationByShippingKey.get(shippingKey), calculation);
-          } else {
-            calculationByShippingKey.set(shippingKey, {
-              calculation: { ...calculation },
-              shippingInfo: shippingInfoByKey.get(shippingKey)
-            });
-          }
-        }
-      }
+      this.mapFromRequests(calculations, requests, calculationByShippingKey, shippingInfoByKey);
     } else {
       logger.warn('No requests provided, mapping calculations to shippingInfoGroups by index (may be inaccurate)');
-      for (let i = 0; i < Math.min(calculations.length, shippingInfoGroups.length); i++) {
-        const calculation = calculations[i];
-        const shippingInfo = shippingInfoGroups[i];
-        
-        if (shippingInfo?.shippingKey && calculation) {
-          const shippingKey = shippingInfo.shippingKey;
-          
-          if (calculationByShippingKey.has(shippingKey)) {
-            this.combineShippingCosts(calculationByShippingKey.get(shippingKey), calculation);
-          } else {
-            calculationByShippingKey.set(shippingKey, {
-              calculation: { ...calculation },
-              shippingInfo
-            });
-          }
-        }
-      }
+      this.mapFromShippingInfoGroups(calculations, shippingInfoGroups, calculationByShippingKey);
     }
     
     return calculationByShippingKey;
+  }
+
+  /**
+   * Process a calculation and add or combine it in the calculations map by shippingKey
+   * @param {Object} calculation - The Stripe calculation to process
+   * @param {string} shippingKey - The shipping method key
+   * @param {Map} calculationByShippingKey - The map where calculations are stored by shippingKey
+   * @param {Object} shippingInfo - Shipping information object (can be null/undefined)
+   * @private
+   */
+  processCalculationMapping(calculation, shippingKey, calculationByShippingKey, shippingInfo) {
+    if (calculationByShippingKey.has(shippingKey)) {
+      // If shippingKey already exists, combine shipping costs
+      this.combineShippingCosts(calculationByShippingKey.get(shippingKey), calculation);
+    } else {
+      // If shippingKey doesn't exist, create new entry
+      calculationByShippingKey.set(shippingKey, {
+        calculation: { ...calculation },
+        shippingInfo: shippingInfo
+      });
+    }
+  }
+
+  /**
+   * Map calculations from requests array using shippingKey from each request
+   * @param {Array} calculations - Array of Stripe calculations
+   * @param {Array} requests - Array of Stripe requests (each with shippingKey property)
+   * @param {Map} calculationByShippingKey - Map where results are stored
+   * @param {Map} shippingInfoByKey - Map of shippingInfo objects by shippingKey
+   * @private
+   */
+  mapFromRequests(calculations, requests, calculationByShippingKey, shippingInfoByKey) {
+    for (let i = 0; i < Math.min(calculations.length, requests.length); i++) {
+      const request = requests[i];
+      const calculation = calculations[i];
+      
+      // Validate that we have both shippingKey and calculation
+      if (request?.shippingKey && calculation) {
+        const shippingKey = request.shippingKey;
+        const shippingInfo = shippingInfoByKey.get(shippingKey);
+        
+        // Use common processing function
+        this.processCalculationMapping(
+          calculation,
+          shippingKey,
+          calculationByShippingKey,
+          shippingInfo
+        );
+      }
+    }
+  }
+
+  /**
+   * Map calculations from shippingInfoGroups array using shippingKey from each group
+   * @param {Array} calculations - Array of Stripe calculations
+   * @param {Array} shippingInfoGroups - Array of shipping info groups (each with shippingKey property)
+   * @param {Map} calculationByShippingKey - Map where results are stored
+   * @private
+   */
+  mapFromShippingInfoGroups(calculations, shippingInfoGroups, calculationByShippingKey) {
+    for (let i = 0; i < Math.min(calculations.length, shippingInfoGroups.length); i++) {
+      const calculation = calculations[i];
+      const shippingInfo = shippingInfoGroups[i];
+      
+      // Validate that we have both shippingKey and calculation
+      if (shippingInfo?.shippingKey && calculation) {
+        const shippingKey = shippingInfo.shippingKey;
+        
+        // Use common processing function
+        // In this case, shippingInfo comes directly from the array
+        this.processCalculationMapping(
+          calculation,
+          shippingKey,
+          calculationByShippingKey,
+          shippingInfo
+        );
+      }
+    }
   }
 
   /**

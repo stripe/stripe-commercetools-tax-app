@@ -11,8 +11,6 @@ const stripe = new Stripe(process.env.TAX_PROVIDER_API_TOKEN);
  * 2. Stripe address verification (confirms Stripe accepts address for tax calculation)
  */
 class AddressService {
-  constructor() {
-  }
 
   /**
    * Validate an address using local rules and verify with Stripe
