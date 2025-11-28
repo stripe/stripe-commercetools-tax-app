@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { validateAddress } from '../validators/address.validator.js';
 import { logger } from '../utils/logger.utils.js';
 
-const stripe = new Stripe(process.env.TAX_PROVIDER_API_TOKEN);
+const stripe = new Stripe(process.env.STRIPE_API_TOKEN);
 
 /**
  * Address Service

@@ -151,10 +151,10 @@ describe('ShipFromService', () => {
 
     it('should resolve address from default_business (STRATEGY 3) when SHIP_FROM_REQUIRED is true', async () => {
       process.env.SHIP_FROM_REQUIRED = 'true';
-      process.env.DEFAULT_BUSINESS_COUNTRY = 'US';
-      process.env.DEFAULT_BUSINESS_STATE = 'CA';
-      process.env.DEFAULT_BUSINESS_CITY = 'San Francisco';
-      process.env.DEFAULT_BUSINESS_POSTAL_CODE = '94102';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_COUNTRY = 'US';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_STATE = 'CA';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_CITY = 'San Francisco';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_POSTAL_CODE = '94102';
 
       const lineItem = {
         id: 'line-item-3',
@@ -417,12 +417,12 @@ describe('ShipFromService', () => {
 
   describe('getDefaultBusinessAddress', () => {
     it('should return default address from environment variables', () => {
-      process.env.DEFAULT_BUSINESS_COUNTRY = 'GB';
-      process.env.DEFAULT_BUSINESS_STATE = 'England';
-      process.env.DEFAULT_BUSINESS_CITY = 'London';
-      process.env.DEFAULT_BUSINESS_POSTAL_CODE = 'SW1A 1AA';
-      process.env.DEFAULT_BUSINESS_LINE1 = '10 Downing Street';
-      process.env.DEFAULT_BUSINESS_LINE2 = 'Office 1';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_COUNTRY = 'GB';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_STATE = 'England';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_CITY = 'London';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_POSTAL_CODE = 'SW1A 1AA';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_LINE1 = '10 Downing Street';
+      process.env.SHIP_FROM_DEFAULT_BUSINESS_LINE2 = 'Office 1';
 
       const result = shipFromService.getDefaultBusinessAddress();
 
@@ -437,12 +437,12 @@ describe('ShipFromService', () => {
     });
 
     it('should return default values when environment variables are not set', () => {
-      delete process.env.DEFAULT_BUSINESS_COUNTRY;
-      delete process.env.DEFAULT_BUSINESS_STATE;
-      delete process.env.DEFAULT_BUSINESS_CITY;
-      delete process.env.DEFAULT_BUSINESS_POSTAL_CODE;
-      delete process.env.DEFAULT_BUSINESS_LINE1;
-      delete process.env.DEFAULT_BUSINESS_LINE2;
+      delete process.env.SHIP_FROM_DEFAULT_BUSINESS_COUNTRY;
+      delete process.env.SHIP_FROM_DEFAULT_BUSINESS_STATE;
+      delete process.env.SHIP_FROM_DEFAULT_BUSINESS_CITY;
+      delete process.env.SHIP_FROM_DEFAULT_BUSINESS_POSTAL_CODE;
+      delete process.env.SHIP_FROM_DEFAULT_BUSINESS_LINE1;
+      delete process.env.SHIP_FROM_DEFAULT_BUSINESS_LINE2;
 
       const result = shipFromService.getDefaultBusinessAddress();
 
@@ -615,8 +615,8 @@ describe('ShipFromService', () => {
   });
 
   describe('selectOptimalChannel', () => {
-    it('should select channel by priority when CHANNEL_PRIORITY is set', async () => {
-      process.env.CHANNEL_PRIORITY = 'channel-2,channel-1,channel-3';
+    it('should select channel by priority when SHIP_FROM_CHANNEL_PRIORITY is set', async () => {
+      process.env.SHIP_FROM_CHANNEL_PRIORITY = 'channel-2,channel-1,channel-3';
 
       const entries = [
         {
@@ -658,7 +658,7 @@ describe('ShipFromService', () => {
     });
 
     it('should select channel with highest stock when no priority is set', async () => {
-      delete process.env.CHANNEL_PRIORITY;
+      delete process.env.SHIP_FROM_CHANNEL_PRIORITY;
 
       const entries = [
         {
@@ -716,7 +716,7 @@ describe('ShipFromService', () => {
     });
 
     it('should handle empty priority configuration', async () => {
-      process.env.CHANNEL_PRIORITY = '';
+      process.env.SHIP_FROM_CHANNEL_PRIORITY = '';
 
       const entries = [
         {
@@ -878,16 +878,16 @@ describe('ShipFromService', () => {
   });
 
   describe('getChannelPriority', () => {
-    it('should return empty array when CHANNEL_PRIORITY is not set', () => {
-      delete process.env.CHANNEL_PRIORITY;
+    it('should return empty array when SHIP_FROM_CHANNEL_PRIORITY is not set', () => {
+      delete process.env.SHIP_FROM_CHANNEL_PRIORITY;
 
       const result = shipFromService.getChannelPriority();
 
       expect(result).toEqual([]);
     });
 
-    it('should parse CHANNEL_PRIORITY with spaces', () => {
-      process.env.CHANNEL_PRIORITY = 'channel-1, channel-2 , channel-3';
+    it('should parse SHIP_FROM_CHANNEL_PRIORITY with spaces', () => {
+      process.env.SHIP_FROM_CHANNEL_PRIORITY = 'channel-1, channel-2 , channel-3';
 
       const result = shipFromService.getChannelPriority();
 

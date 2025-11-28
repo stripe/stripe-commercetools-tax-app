@@ -1099,70 +1099,94 @@ class UpdateActionService {
     for (const shippingKey of shippingKeysToProcess) {
       const mappedData = calculationByShippingKey.get(shippingKey);
       const shippingInfo = shippingInfoByKey.get(shippingKey);
-      
-      if (mappedData && mappedData.calculation) {
-        const { calculation } = mappedData;
-        
-        if (!shippingInfo) {
-          logger.warn(`No shippingInfo found for shippingKey ${shippingKey}, using calculation data`);
-        }
-        
-        const shippingAmount = calculation.shipping_cost?.amount || 0;
-        const shippingTaxAmount = calculation.shipping_cost?.amount_tax || 0;
-        
-        if (!calculation.shipping_cost || shippingTaxAmount <= 0) {
-          shippingActions.push(this.createZeroTaxShippingAction(shippingKey, calculation, cart, shippingAmount));
-          continue;
-        }
-        
-        const taxBreakdown = this.findOrCreateShippingTaxBreakdown(
-          calculation, 
-          shippingAmount, 
-          shippingTaxAmount
-        );
-        
-        if (!taxBreakdown) {
-          logger.warn(`No tax breakdown found for shipping method ${shippingKey}, creating action with tax = 0`);
-          shippingActions.push(this.createZeroTaxShippingAction(shippingKey, calculation, cart, shippingAmount));
-          continue;
-        }
-        
-        const taxRateDetails = taxBreakdown.tax_rate_details;
-        
-        shippingActions.push({
-          action: "setShippingMethodTaxAmount",
-          shippingKey: shippingKey,
-          externalTaxAmount: {
-            totalGross: {
-              currencyCode: calculation.currency?.toUpperCase() || cart?.totalPrice?.currencyCode || 'USD',
-              centAmount: shippingAmount + shippingTaxAmount
-            },
-            taxRate: {
-              name: taxRateDetails.tax_type || 'shipping_tax',
-              amount: parseFloat(taxRateDetails.percentage_decimal || 0) / 100,
-              country: taxBreakdown.jurisdiction?.country || taxRateDetails.country
-            }
-          }
-        });
-        
-      } else {
-        logger.info(`No calculation found for shippingKey ${shippingKey}, creating action with tax = 0`);
-        // Try to get shipping amount from cart
-        let shippingAmount = 0;
-        if (cart?.shipping) {
-          const shippingMethod = Array.isArray(cart.shipping) 
-            ? cart.shipping.find(s => s.shippingKey === shippingKey)
-            : cart.shipping;
-          if (shippingMethod?.shippingInfo?.price?.centAmount) {
-            shippingAmount = shippingMethod.shippingInfo.price.centAmount;
-          }
-        }
-        shippingActions.push(this.createZeroTaxShippingAction(shippingKey, null, cart, shippingAmount));
-      }
+      const action = this.processShippingKey(shippingKey, mappedData, shippingInfo, cart);
+      shippingActions.push(action);
     }
     
     logger.info(`Created ${shippingActions.length} shipping tax update actions for ${shippingKeysToProcess.length} shipping methods`);
     return shippingActions;
+  }
+
+  /**
+   * Process a single shipping key and return the corresponding tax action
+   * @param {string} shippingKey - Shipping method key
+   * @param {Object} mappedData - Mapped calculation data (may be null)
+   * @param {Object} shippingInfo - Shipping info object (may be null)
+   * @param {Object} cart - Commercetools cart
+   * @returns {Object} Shipping tax update action
+   * @private
+   */
+  processShippingKey(shippingKey, mappedData, shippingInfo, cart) {
+    // Early return if no calculation available
+    if (!mappedData?.calculation) {
+      logger.info(`No calculation found for shippingKey ${shippingKey}, creating action with tax = 0`);
+      const shippingAmount = this.getShippingAmountFromCart(cart, shippingKey);
+      return this.createZeroTaxShippingAction(shippingKey, null, cart, shippingAmount);
+    }
+    
+    const { calculation } = mappedData;
+    
+    if (!shippingInfo) {
+      logger.warn(`No shippingInfo found for shippingKey ${shippingKey}, using calculation data`);
+    }
+    
+    const shippingAmount = calculation.shipping_cost?.amount || 0;
+    const shippingTaxAmount = calculation.shipping_cost?.amount_tax || 0;
+    
+    // Early return if no shipping_cost or tax <= 0
+    if (!calculation.shipping_cost || shippingTaxAmount <= 0) {
+      return this.createZeroTaxShippingAction(shippingKey, calculation, cart, shippingAmount);
+    }
+    
+    // Find tax breakdown
+    const taxBreakdown = this.findOrCreateShippingTaxBreakdown(
+      calculation, 
+      shippingAmount, 
+      shippingTaxAmount
+    );
+    
+    // Early return if no tax breakdown found
+    if (!taxBreakdown) {
+      logger.warn(`No tax breakdown found for shipping method ${shippingKey}, creating action with tax = 0`);
+      return this.createZeroTaxShippingAction(shippingKey, calculation, cart, shippingAmount);
+    }
+    
+    // Create action with tax breakdown
+    const taxRateDetails = taxBreakdown.tax_rate_details;
+    return {
+      action: "setShippingMethodTaxAmount",
+      shippingKey: shippingKey,
+      externalTaxAmount: {
+        totalGross: {
+          currencyCode: calculation.currency?.toUpperCase() || cart?.totalPrice?.currencyCode || 'USD',
+          centAmount: shippingAmount + shippingTaxAmount
+        },
+        taxRate: {
+          name: taxRateDetails.tax_type || 'shipping_tax',
+          amount: parseFloat(taxRateDetails.percentage_decimal || 0) / 100,
+          country: taxBreakdown.jurisdiction?.country || taxRateDetails.country
+        }
+      }
+    };
+  }
+
+  /**
+   * Extract shipping amount from cart for a given shipping key
+   * @param {Object} cart - Commercetools cart
+   * @param {string} shippingKey - Shipping method key
+   * @returns {number} Shipping amount in cents, or 0 if not found
+   * @private
+   */
+  getShippingAmountFromCart(cart, shippingKey) {
+    if (!cart?.shipping) {
+      return 0;
+    }
+    
+    const shippingMethod = Array.isArray(cart.shipping)
+      ? cart.shipping.find(s => s.shippingKey === shippingKey)
+      : cart.shipping;
+    
+    return shippingMethod?.shippingInfo?.price?.centAmount || 0;
   }
 
   /**

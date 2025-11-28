@@ -3,8 +3,8 @@ import 'dotenv/config';
 import { createApiRoot } from '../clients/create.client.js';
 import { createChangedOrderSubscription, createCustomTypes } from './action.js';
 import { CTP_ORDER_CHANGE_SUBSCRIPTION_KEY } from '../constants/connectors.constants.js';
-const CONNECT_GCP_TOPIC_NAME_KEY = 'CONNECT_GCP_TOPIC_NAME';
-const CONNECT_GCP_PROJECT_ID_KEY = 'CONNECT_GCP_PROJECT_ID';
+const CONNECT_SUBSCRIPTION_TOPIC_NAME_KEY = 'CONNECT_SUBSCRIPTION_TOPIC_NAME';
+const CONNECT_SUBSCRIPTION_PROJECT_ID_KEY = 'CONNECT_SUBSCRIPTION_PROJECT_ID';
 
 /**
  * Post-deployment function that creates the commercetools extension and custom types.
@@ -13,8 +13,8 @@ const CONNECT_GCP_PROJECT_ID_KEY = 'CONNECT_GCP_PROJECT_ID';
  * @param {Map} properties - Map containing environment variables and configuration properties
  */
 async function postDeploy(properties) {
-  const topicName = properties.get(CONNECT_GCP_TOPIC_NAME_KEY);
-  const projectId = properties.get(CONNECT_GCP_PROJECT_ID_KEY);
+  const topicName = properties.get(CONNECT_SUBSCRIPTION_TOPIC_NAME_KEY);
+  const projectId = properties.get(CONNECT_SUBSCRIPTION_PROJECT_ID_KEY);
 
   const apiRoot = createApiRoot();
   await createChangedOrderSubscription(

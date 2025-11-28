@@ -244,7 +244,7 @@ describe('action.js', () => {
       await validateTaxCodeMapping(mockApiRoot, null);
 
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('TAX_CODE_MAPPING_JSON is empty')
+        expect.stringContaining('TAX_CODE_CATEGORY_MAPPING_JSON is empty')
       );
     });
 
@@ -252,7 +252,7 @@ describe('action.js', () => {
       await validateTaxCodeMapping(mockApiRoot, { categories: [] });
 
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('TAX_CODE_MAPPING_JSON is empty')
+        expect.stringContaining('TAX_CODE_CATEGORY_MAPPING_JSON is empty')
       );
     });
 

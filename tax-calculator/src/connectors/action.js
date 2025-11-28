@@ -214,7 +214,7 @@ async function validateCategoryExists(apiRoot, id, key, index) {
       const identifierDesc = formatIdentifierDescription(id, key, 'error');
       throw new Error(
         `Category validation failed: Category with ${identifierDesc} does not exist in commercetools project. ` +
-          `Please ensure all categories in TAX_CODE_MAPPING_JSON exist before installing the connector.`
+          `Please ensure all categories in TAX_CODE_CATEGORY_MAPPING_JSON exist before installing the connector.`
       );
     }
   } catch (error) {
@@ -228,7 +228,7 @@ async function validateCategoryExists(apiRoot, id, key, index) {
 }
 
 /**
- * Validate that all categories in TAX_CODE_MAPPING_JSON exist in commercetools
+ * Validate that all categories in TAX_CODE_CATEGORY_MAPPING_JSON exist in commercetools
  *
  * This validation ensures that the tax code mapping configuration is valid before
  * the connector is fully installed. Since tax-calculator uses this mapping at runtime
@@ -241,7 +241,7 @@ async function validateCategoryExists(apiRoot, id, key, index) {
 export async function validateTaxCodeMapping(apiRoot, mapping) {
   // If mapping is empty or has no categories, allow installation
   if (!mapping || !mapping.categories || mapping.categories.length === 0) {
-    logger.info('TAX_CODE_MAPPING_JSON is empty or not provided. Connector will be installed with empty mapping.');
+    logger.info('TAX_CODE_CATEGORY_MAPPING_JSON is empty or not provided. Connector will be installed with empty mapping.');
     return;
   }
 

@@ -16,10 +16,10 @@ function readConfiguration() {
     projectKey: process.env.CTP_PROJECT_KEY,
     scope: process.env.CTP_SCOPE,
     region: process.env.CTP_REGION,
-    stripeApiToken: process.env.TAX_PROVIDER_API_TOKEN,
-    taxCodeMapping: process.env.TAX_CODE_MAPPING_JSON,
+    stripeApiToken: process.env.STRIPE_API_TOKEN,
+    taxCodeMapping: process.env.TAX_CODE_CATEGORY_MAPPING_JSON,
     taxBehaviorDefault: process.env.TAX_BEHAVIOR_DEFAULT,
-    countryTaxBehaviorMapping: process.env.COUNTRY_TAX_BEHAVIOR_MAPPING
+    countryTaxBehaviorMapping: process.env.TAX_BEHAVIOR_COUNTRY_MAPPING
   };
 
   const validationErrors = getValidateMessages(envValidators, envVars);

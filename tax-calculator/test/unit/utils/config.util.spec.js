@@ -48,10 +48,10 @@ describe('ConfigUtil', () => {
       process.env.CTP_PROJECT_KEY = 'test-project';
       process.env.CTP_SCOPE = 'test-scope';
       process.env.CTP_REGION = 'us-central1.gcp';
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
-      process.env.TAX_CODE_MAPPING_JSON = '{}';
+      process.env.STRIPE_API_TOKEN = 'sk_test_token';
+      process.env.TAX_CODE_CATEGORY_MAPPING_JSON = '{}';
       process.env.TAX_BEHAVIOR_DEFAULT = 'exclusive';
-      process.env.COUNTRY_TAX_BEHAVIOR_MAPPING = '{}';
+      process.env.TAX_BEHAVIOR_COUNTRY_MAPPING = '{}';
 
       getValidateMessages.mockReturnValue([]);
 
@@ -90,7 +90,7 @@ describe('ConfigUtil', () => {
       process.env.CTP_CLIENT_SECRET = '12345678901234567890123456789012';
       process.env.CTP_PROJECT_KEY = 'test-project';
       process.env.CTP_REGION = 'us-central1.gcp';
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
+      process.env.STRIPE_API_TOKEN = 'sk_test_token';
 
       const validationErrors = [
         {
@@ -118,13 +118,13 @@ describe('ConfigUtil', () => {
       process.env.CTP_CLIENT_SECRET = '12345678901234567890123456789012';
       process.env.CTP_PROJECT_KEY = 'test-project';
       process.env.CTP_REGION = 'us-central1.gcp';
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
+      process.env.STRIPE_API_TOKEN = 'sk_test_token';
       
       // Optional vars not set
       delete process.env.CTP_SCOPE;
-      delete process.env.TAX_CODE_MAPPING_JSON;
+      delete process.env.TAX_CODE_CATEGORY_MAPPING_JSON;
       delete process.env.TAX_BEHAVIOR_DEFAULT;
-      delete process.env.COUNTRY_TAX_BEHAVIOR_MAPPING;
+      delete process.env.TAX_BEHAVIOR_COUNTRY_MAPPING;
 
       getValidateMessages.mockReturnValue([]);
 
@@ -142,10 +142,10 @@ describe('ConfigUtil', () => {
       process.env.CTP_PROJECT_KEY = 'test-project';
       process.env.CTP_SCOPE = 'test-scope';
       process.env.CTP_REGION = 'us-central1.gcp';
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
-      process.env.TAX_CODE_MAPPING_JSON = '{"categories": []}';
+      process.env.STRIPE_API_TOKEN = 'sk_test_token';
+      process.env.TAX_CODE_CATEGORY_MAPPING_JSON = '{"categories": []}';
       process.env.TAX_BEHAVIOR_DEFAULT = 'inclusive';
-      process.env.COUNTRY_TAX_BEHAVIOR_MAPPING = '{"US": "exclusive"}';
+      process.env.TAX_BEHAVIOR_COUNTRY_MAPPING = '{"US": "exclusive"}';
 
       getValidateMessages.mockReturnValue([]);
 

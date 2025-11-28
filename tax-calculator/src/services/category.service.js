@@ -119,6 +119,9 @@ class CategoryService {
 
   /**
     * Gets categories from commercetools API
+   * @param {Array<string>} productIds - Array of product IDs
+   * @param {Object} options - Options object with staged and locale
+   * @returns {Promise<Map<string, Array<Object>>>} Map where key=productId, value=array of expanded categories
    * @private
    */
   async fetchCategoriesFromAPI(productIds, options) {
@@ -172,6 +175,9 @@ class CategoryService {
 
   /**
    * Handles queries when there are more than 500 products (commercetools limit)
+   * @param {Array<string>} productIds - Array of product IDs
+   * @param {Object} options - Options object with staged and locale
+   * @returns {Promise<Map<string, Array<Object>>>} Map where key=productId, value=array of expanded categories
    * @private
    */
   async fetchCategoriesInBatches(productIds, options) {

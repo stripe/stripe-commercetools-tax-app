@@ -14,7 +14,7 @@ import taxCodeMappingConfig from '../../../src/config/taxCodeMapping.config.js';
 import { logger } from '../../../src/utils/logger.utils.js';
 
 describe('TaxCodeMappingConfig', () => {
-  const originalEnv = process.env.TAX_CODE_MAPPING_JSON;
+  const originalEnv = process.env.TAX_CODE_CATEGORY_MAPPING_JSON;
   let originalMapping;
   let originalLastLoadedAt;
 
@@ -28,7 +28,7 @@ describe('TaxCodeMappingConfig', () => {
     taxCodeMappingConfig.lastLoadedAt = null;
     
     // Clear environment variable
-    delete process.env.TAX_CODE_MAPPING_JSON;
+    delete process.env.TAX_CODE_CATEGORY_MAPPING_JSON;
     
     jest.clearAllMocks();
   });
@@ -37,7 +37,7 @@ describe('TaxCodeMappingConfig', () => {
     // Restore original state
     taxCodeMappingConfig.mapping = originalMapping;
     taxCodeMappingConfig.lastLoadedAt = originalLastLoadedAt;
-    process.env.TAX_CODE_MAPPING_JSON = originalEnv;
+    process.env.TAX_CODE_CATEGORY_MAPPING_JSON = originalEnv;
   });
 
   describe('loadMapping', () => {
@@ -49,17 +49,17 @@ describe('TaxCodeMappingConfig', () => {
 
       expect(result).toBe(cachedMapping);
       expect(logger.debug).toHaveBeenCalledWith('Using cached tax code mapping');
-      expect(process.env.TAX_CODE_MAPPING_JSON).toBeUndefined();
+      expect(process.env.TAX_CODE_CATEGORY_MAPPING_JSON).toBeUndefined();
     });
 
-    it('should return empty mapping when TAX_CODE_MAPPING_JSON is not set', () => {
+    it('should return empty mapping when TAX_CODE_CATEGORY_MAPPING_JSON is not set', () => {
       const result = taxCodeMappingConfig.loadMapping();
 
       expect(result).toEqual({ categories: [] });
       expect(taxCodeMappingConfig.mapping).toEqual({ categories: [] });
       expect(taxCodeMappingConfig.lastLoadedAt).toBeDefined();
       expect(logger.warn).toHaveBeenCalledWith(
-        'TAX_CODE_MAPPING_JSON environment variable not set. Tax code lookup will rely on product custom fields only.'
+        'TAX_CODE_CATEGORY_MAPPING_JSON environment variable not set. Tax code lookup will rely on product custom fields only.'
       );
     });
 
@@ -73,7 +73,7 @@ describe('TaxCodeMappingConfig', () => {
         ]
       };
 
-      process.env.TAX_CODE_MAPPING_JSON = JSON.stringify(validMapping);
+      process.env.TAX_CODE_CATEGORY_MAPPING_JSON = JSON.stringify(validMapping);
 
       const result = taxCodeMappingConfig.loadMapping();
 
@@ -90,14 +90,14 @@ describe('TaxCodeMappingConfig', () => {
     });
 
     it('should throw error when JSON is invalid', () => {
-      process.env.TAX_CODE_MAPPING_JSON = 'invalid json{';
+      process.env.TAX_CODE_CATEGORY_MAPPING_JSON = 'invalid json{';
 
       expect(() => {
         taxCodeMappingConfig.loadMapping();
-      }).toThrow('Invalid TAX_CODE_MAPPING_JSON format');
+      }).toThrow('Invalid TAX_CODE_CATEGORY_MAPPING_JSON format');
 
       expect(logger.error).toHaveBeenCalledWith(
-        'Failed to parse TAX_CODE_MAPPING_JSON',
+        'Failed to parse TAX_CODE_CATEGORY_MAPPING_JSON',
         expect.objectContaining({
           error: expect.any(String),
           rawValue: 'invalid json{'
@@ -107,7 +107,7 @@ describe('TaxCodeMappingConfig', () => {
 
     it('should throw error when mapping structure is invalid', () => {
       const invalidMapping = { invalid: 'structure' };
-      process.env.TAX_CODE_MAPPING_JSON = JSON.stringify(invalidMapping);
+      process.env.TAX_CODE_CATEGORY_MAPPING_JSON = JSON.stringify(invalidMapping);
 
       expect(() => {
         taxCodeMappingConfig.loadMapping();
@@ -252,7 +252,7 @@ describe('TaxCodeMappingConfig', () => {
           { ctCategory: { id: 'cat3', key: 'cat3' }, taxCode: 'txcd_33333333' }
         ]
       };
-      process.env.TAX_CODE_MAPPING_JSON = JSON.stringify(validMapping);
+      process.env.TAX_CODE_CATEGORY_MAPPING_JSON = JSON.stringify(validMapping);
       taxCodeMappingConfig.loadMapping();
     });
 

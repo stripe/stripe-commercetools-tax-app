@@ -24,7 +24,7 @@ class TaxOrchestratorService {
   /**
    * Main orchestration method
    * @param {Object} cart - commercetools cart object
-   * @returns {Promise<Object>}201 response object with update actions
+   * @returns {Promise<Object>} 201 response object with update actions
    */
   async orchestrateTaxCalculation(cart) {
     const startTime = Date.now();
@@ -79,26 +79,12 @@ class TaxOrchestratorService {
       });
 
       // STEP 4: For each group, create separate requests by shippingKey
-      const requests = [];
-      const shippingInfoGroups = [];
-      
-      for (const group of shipFromGroups) {
-        // Creates one request per shipping method (by shippingKey) for precision
-        const groupRequests = await this.createRequestsForGroup(group, cart, taxBehaviors, categoriesMap);
-        
-        // Track shipping info for result combination
-        if (cart.shippingMode === 'Multiple') {
-          groupRequests.forEach(req => {
-            shippingInfoGroups.push({
-              shippingKey: req.shippingKey, // Track which shipping method this is for
-              taxCode: req.shipping_cost?.tax_code || null,
-              lineItems: req.line_items.map(li => li.reference),
-              hasShippingCost: !!req.shipping_cost
-            });
-          });
-        }
-        requests.push(...groupRequests);
-      }
+      const { requests, shippingInfoGroups } = await this.createRequestsAndTrackShippingInfo(
+        shipFromGroups,
+        cart,
+        taxBehaviors,
+        categoriesMap
+      );
       
       logger.info('Stripe requests prepared', {
         requestsCount: requests.length,
@@ -141,6 +127,40 @@ class TaxOrchestratorService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Create Stripe requests and track shipping info groups
+   * @param {Array} shipFromGroups - Ship-from groups
+   * @param {Object} cart - Original cart
+   * @param {Object} taxBehaviors - Tax behavior map for line items
+   * @param {Object} categoriesMap - Map of categories for products
+   * @returns {Promise<Object>} Object with { requests, shippingInfoGroups }
+   * @private
+   */
+  async createRequestsAndTrackShippingInfo(shipFromGroups, cart, taxBehaviors, categoriesMap) {
+    const requests = [];
+    const shippingInfoGroups = [];
+    
+    for (const group of shipFromGroups) {
+      // Creates one request per shipping method (by shippingKey) for precision
+      const groupRequests = await this.createRequestsForGroup(group, cart, taxBehaviors, categoriesMap);
+      
+      // Track shipping info for result combination
+      if (cart.shippingMode === 'Multiple') {
+        groupRequests.forEach(req => {
+          shippingInfoGroups.push({
+            shippingKey: req.shippingKey, // Track which shipping method this is for
+            taxCode: req.shipping_cost?.tax_code || null,
+            lineItems: req.line_items.map(li => li.reference),
+            hasShippingCost: !!req.shipping_cost
+          });
+        });
+      }
+      requests.push(...groupRequests);
+    }
+    
+    return { requests, shippingInfoGroups };
   }
 
   /**
@@ -208,7 +228,7 @@ class TaxOrchestratorService {
    * @param {Object} cart - Original cart
    * @param {Object} taxBehaviors - Tax behavior map for line items
    * @param {Object} categoriesMap - Map of categories for products
-   * @returns {Object} Stripe request object
+   * @returns {Promise<Object>} Stripe request object
    */
   async createSingleRequestForGroup(group, cart, taxBehaviors, categoriesMap) {
     const request = {
@@ -276,62 +296,13 @@ class TaxOrchestratorService {
    * @returns {Promise<Array>} Array of Stripe request objects
    */
   async createSeparatedRequestsByShippingKey(group, cart, taxBehaviors, categoriesMap) {
+    const shippingCostsMap = await this.fetchShippingCostsMap(cart);
     const requests = [];
-    
-    // Fetch all shipping costs in parallel
-    const shippingCostPromises = cart.shipping.map(shipping => 
-      this.getShippingCostForShippingMethod(shipping).then(cost => ({ shipping, cost }))
-    );
-    const shippingCostsResults = await Promise.all(shippingCostPromises);
-    const shippingCostsMap = new Map(
-      shippingCostsResults.map(({ shipping, cost }) => [shipping.shippingKey, cost])
-    );
     
     // Create one request per shipping method
     for (const shipping of cart.shipping) {
-      const request = {
-        customer_details: {
-          address: this.extractCustomerAddress(cart, shipping),
-          address_source: 'shipping'
-        },
-        line_items: [],
-        currency: cart.totalPrice.currencyCode,
-        expand: ['line_items'],
-        shippingKey: shipping.shippingKey // Store for tracking
-      };
-      
-      // Only include ship_from_details if address is available
-      // For digital products or optional ship-from, omit this field
-      if (group.shipFromAddress) {
-        request.ship_from_details = {
-          address: group.shipFromAddress
-        };
-      }
-      
-      // Add line items that target this specific shipping method
-      for (const lineItem of group.lineItems) {
-        const lineItemData = this.buildLineItemForShippingMethod(
-          cart,
-          lineItem,
-          shipping.shippingKey,
-          taxBehaviors,
-          categoriesMap
-        );
-        
-        if (lineItemData && lineItemData.amount > 0) {
-          request.line_items.push(lineItemData);
-        }
-      }
-      
-      // Add shipping cost for this specific shipping method (from pre-fetched map)
-      const shippingCost = shippingCostsMap.get(shipping.shippingKey);
-      if (shippingCost?.amount) {
-        request.shipping_cost = {
-          amount: shippingCost.amount,
-          tax_code: shippingCost.tax_code,
-          tax_behavior: 'exclusive'
-        };
-      }
+      const request = this.buildRequestForShippingMethod(shipping, group, cart);
+      this.populateRequestWithLineItems(request, group, shipping, cart, taxBehaviors, categoriesMap, shippingCostsMap);
       
       // Only add request if it has line items or shipping cost
       // Avoid creating empty requests to Stripe
@@ -346,6 +317,91 @@ class TaxOrchestratorService {
     }
     
     return requests;
+  }
+
+  /**
+   * Fetch all shipping costs in parallel and return as a Map
+   * @param {Object} cart - Original cart
+   * @returns {Promise<Map>} Map where key=shippingKey, value=shipping cost object
+   * @private
+   */
+  async fetchShippingCostsMap(cart) {
+    const shippingCostPromises = cart.shipping.map(shipping => 
+      this.getShippingCostForShippingMethod(shipping).then(cost => ({ shipping, cost }))
+    );
+    const shippingCostsResults = await Promise.all(shippingCostPromises);
+    return new Map(
+      shippingCostsResults.map(({ shipping, cost }) => [shipping.shippingKey, cost])
+    );
+  }
+
+  /**
+   * Build base request structure for a shipping method
+   * @param {Object} shipping - Shipping method object
+   * @param {Object} group - Ship-from group
+   * @param {Object} cart - Original cart
+   * @returns {Object} Base Stripe request object
+   * @private
+   */
+  buildRequestForShippingMethod(shipping, group, cart) {
+    const request = {
+      customer_details: {
+        address: this.extractCustomerAddress(cart, shipping),
+        address_source: 'shipping'
+      },
+      line_items: [],
+      currency: cart.totalPrice.currencyCode,
+      expand: ['line_items'],
+      shippingKey: shipping.shippingKey // Store for tracking
+    };
+    
+    // Only include ship_from_details if address is available
+    // For digital products or optional ship-from, omit this field
+    if (group.shipFromAddress) {
+      request.ship_from_details = {
+        address: group.shipFromAddress
+      };
+    }
+    
+    return request;
+  }
+
+  /**
+   * Populate request with line items and shipping cost
+   * @param {Object} request - Stripe request object to populate
+   * @param {Object} group - Ship-from group
+   * @param {Object} shipping - Shipping method object
+   * @param {Object} cart - Original cart
+   * @param {Object} taxBehaviors - Tax behavior map for line items
+   * @param {Object} categoriesMap - Map of categories for products
+   * @param {Map} shippingCostsMap - Map of shipping costs by shippingKey
+   * @private
+   */
+  populateRequestWithLineItems(request, group, shipping, cart, taxBehaviors, categoriesMap, shippingCostsMap) {
+    // Add line items that target this specific shipping method
+    for (const lineItem of group.lineItems) {
+      const lineItemData = this.buildLineItemForShippingMethod(
+        cart,
+        lineItem,
+        shipping.shippingKey,
+        taxBehaviors,
+        categoriesMap
+      );
+      
+      if (lineItemData && lineItemData.amount > 0) {
+        request.line_items.push(lineItemData);
+      }
+    }
+    
+    // Add shipping cost for this specific shipping method (from pre-fetched map)
+    const shippingCost = shippingCostsMap.get(shipping.shippingKey);
+    if (shippingCost?.amount) {
+      request.shipping_cost = {
+        amount: shippingCost.amount,
+        tax_code: shippingCost.tax_code,
+        tax_behavior: 'exclusive'
+      };
+    }
   }
 
   /**
@@ -398,7 +454,7 @@ class TaxOrchestratorService {
    * In Single mode, there's only one shipping method for the entire cart,
    * so we return the total shipping cost directly from cart.shippingInfo
    * @param {Object} cart - Original cart
-   * @returns {Object|null} Shipping cost with tax code, or null if no shipping cost
+   * @returns {Promise<Object|null>} Shipping cost with tax code, or null if no shipping cost
    */
   async getShippingCostForGroup(cart) {
     if (!cart.shippingInfo?.price?.centAmount) {
@@ -416,7 +472,7 @@ class TaxOrchestratorService {
   /**
    * Get shipping cost for a specific shipping method
    * @param {Object} shipping - Shipping object from cart
-   * @returns {Object|null} Shipping cost with tax code
+   * @returns {Promise<Object|null>} Shipping cost with tax code
    */
   async getShippingCostForShippingMethod(shipping) {
     if (!shipping.shippingInfo?.price?.centAmount) {

@@ -7,8 +7,8 @@ import { logger } from '../utils/logger.utils.js';
 import {
   CONNECT_SERVICE_URL,
   CTP_TAX_CALCULATOR_EXTENSION_KEY,
-  TAX_PROVIDER_API_TOKEN,
-  TAX_CODE_MAPPING_JSON_KEY,
+  STRIPE_API_TOKEN,
+  TAX_CODE_CATEGORY_MAPPING_JSON_KEY,
 } from './constants.js';
 
 /**
@@ -21,11 +21,11 @@ import {
  */
 export async function postDeploy(properties) {
   const ctpExtensionBaseUrl = properties.get(CONNECT_SERVICE_URL);
-  const stripeApiToken = properties.get(TAX_PROVIDER_API_TOKEN);
+  const stripeApiToken = properties.get(STRIPE_API_TOKEN);
 
   // Validate required properties
   if (!stripeApiToken) {
-    throw new Error(TAX_PROVIDER_API_TOKEN + ' is required for Stripe Tax validation');
+    throw new Error(STRIPE_API_TOKEN + ' is required for Stripe Tax validation');
   }
 
   if (!ctpExtensionBaseUrl) {
@@ -37,7 +37,7 @@ export async function postDeploy(properties) {
   await validateStripeTax(stripeApiToken);
 
   logger.info('Creating commercetools extension...');  
-  const taxCodeMappingJson = properties.get(TAX_CODE_MAPPING_JSON_KEY);
+  const taxCodeMappingJson = properties.get(TAX_CODE_CATEGORY_MAPPING_JSON_KEY);
 
   const apiRoot = createApiRoot();
 
@@ -50,13 +50,13 @@ export async function postDeploy(properties) {
       process.stderr.write(`Post-deploy failed: ${error.message}\n`);
       if (error instanceof SyntaxError) {
         throw new Error(
-          `Invalid TAX_CODE_MAPPING_JSON format: ${error.message}`
+          `Invalid TAX_CODE_CATEGORY_MAPPING_JSON format: ${error.message}`
         );
       }
       throw error;
     }
   } else {
-    logger.info('TAX_CODE_MAPPING_JSON not provided. Connector will be installed with empty mapping.');
+    logger.info('TAX_CODE_CATEGORY_MAPPING_JSON not provided. Connector will be installed with empty mapping.');
   }
 
   // Step 2: Create custom types

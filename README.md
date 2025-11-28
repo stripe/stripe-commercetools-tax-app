@@ -56,7 +56,7 @@ The connector enables real-time tax calculation during checkout and synchronizes
 Users are expected to create API client responsible for API extension creation as well as fetching cart and order details from composable commerce project, API client should have enough scope to be able to do so. These API client details are taken as input as an environment variable/ configuration for connect. Details of composable commerce project can be provided as environment variables (configuration for connect) `CTP_PROJECT_KEY` , `CTP_CLIENT_ID`, `CTP_CLIENT_SECRET`, `CTP_SCOPE`, `CTP_REGION`. For details, please read [Deployment Configuration](./README.md#deployment-configuration).
 
 #### 2. Stripe Tax Account
-Users are expected to have a Stripe account with Stripe Tax enabled. The Stripe API token is required for tax calculations and order synchronization. API token can be provided as environment variable (configuration for connect) `TAX_PROVIDER_API_TOKEN`. For details, please read [Deployment Configuration](./README.md#deployment-configuration).
+Users are expected to have a Stripe account with Stripe Tax enabled. The Stripe API token is required for tax calculations and order synchronization. API token can be provided as environment variable (configuration for connect) `STRIPE_API_TOKEN`. For details, please read [Deployment Configuration](./README.md#deployment-configuration).
 
 **Stripe Tax Setup Requirements:**
 - Stripe Tax must be activated in your Stripe Dashboard
@@ -163,7 +163,7 @@ deployAs:
           description: commercetools composable commerce client secret
         - key: CTP_SCOPE
           description: commercetools composable commerce client scope
-        - key: TAX_PROVIDER_API_TOKEN
+        - key: STRIPE_API_TOKEN
           description: API Token for communication between the connector and tax provider
   - name: order-syncer
     applicationType: event
@@ -184,7 +184,7 @@ deployAs:
           description: commercetools client secreet
         - key: CTP_SCOPE
           description: commercetools client scope
-        - key: TAX_PROVIDER_API_TOKEN
+        - key: STRIPE_API_TOKEN
           description: API Token for communication between the connector and tax provider
 ```
 
@@ -198,24 +198,24 @@ deployAs:
 - **CTP_REGION**: The region of your commercetools project (e.g., `us-central1`, `europe-west1`)
 
 #### Stripe Tax Configuration (Required)
-- **TAX_PROVIDER_API_TOKEN**: Stripe API token (secret key) for Stripe Tax API access
+- **STRIPE_API_TOKEN**: Stripe API token (secret key) for Stripe Tax API access
 
 #### Tax Calculator - Tax Behavior Configuration (Optional)
 - **TAX_BEHAVIOR_DEFAULT**: Default tax behavior for all calculations (`inclusive` or `exclusive`)
-- **COUNTRY_TAX_BEHAVIOR_MAPPING**: JSON string mapping country codes to tax behaviors (e.g., `'{"US":"exclusive","DE":"inclusive"}'`)
+- **TAX_BEHAVIOR_COUNTRY_MAPPING**: JSON string mapping country codes to tax behaviors (e.g., `'{"US":"exclusive","DE":"inclusive"}'`)
 
 #### Tax Calculator - Tax Code Configuration (Optional)
-- **TAX_CODE_MAPPING_JSON**: JSON string mapping commercetools categories to Stripe tax codes
+- **TAX_CODE_CATEGORY_MAPPING_JSON**: JSON string mapping commercetools categories to Stripe tax codes
 
 #### Tax Calculator - Ship-From Configuration (Optional)
 - **SHIP_FROM_REQUIRED**: Whether to require ship-from address (`true` or `false`, default: `false`)
-- **DEFAULT_BUSINESS_COUNTRY**: Default country for ship-from address
-- **DEFAULT_BUSINESS_STATE**: Default state/province for ship-from address
-- **DEFAULT_BUSINESS_CITY**: Default city for ship-from address
-- **DEFAULT_BUSINESS_POSTAL_CODE**: Default postal code for ship-from address
-- **DEFAULT_BUSINESS_LINE1**: Default street address line 1
-- **DEFAULT_BUSINESS_LINE2**: Default street address line 2
-- **CHANNEL_PRIORITY**: Comma-separated channel IDs for priority-based ship-from selection
+- **SHIP_FROM_DEFAULT_BUSINESS_COUNTRY**: Default country for ship-from address
+- **SHIP_FROM_DEFAULT_BUSINESS_STATE**: Default state/province for ship-from address
+- **SHIP_FROM_DEFAULT_BUSINESS_CITY**: Default city for ship-from address
+- **SHIP_FROM_DEFAULT_BUSINESS_POSTAL_CODE**: Default postal code for ship-from address
+- **SHIP_FROM_DEFAULT_BUSINESS_LINE1**: Default street address line 1
+- **SHIP_FROM_DEFAULT_BUSINESS_LINE2**: Default street address line 2
+- **SHIP_FROM_CHANNEL_PRIORITY**: Comma-separated channel IDs for priority-based ship-from selection
 
 #### Tax Calculator - Address Validation Configuration (Optional)
 - **ADDRESS_VALIDATION_RATE_LIMIT**: Rate limit for address validation (requests per minute, default: 100)
