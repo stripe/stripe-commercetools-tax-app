@@ -12,7 +12,7 @@ export const ORDER_TAX_FIELD_NAMES = {
 };
 
 export const ORDER_TAX_CUSTOM_TYPE = {
-  "key": "connector-stripe-tax-calculation-reference",
+  "key": process.env.CUSTOM_TYPE_ORDER_KEY || "connector-stripe-tax-calculation-reference",
   "name": {
     "en": "Stripe Tax Calculation Reference"
   },

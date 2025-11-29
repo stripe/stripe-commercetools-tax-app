@@ -23,7 +23,7 @@ export const CART_TAX_FIELD_NAMES = {
  * Allows merchants to set tax codes directly on products or line items
  */
 export const PRODUCT_TAX_CUSTOM_TYPE = {
-  key: 'connector-stripe-tax-product',
+  key: process.env.CUSTOM_TYPE_PRODUCT_KEY || 'connector-stripe-tax-product',
   name: {
     en: 'Stripe Tax Connector Configuration',
   },
@@ -51,7 +51,7 @@ export const PRODUCT_TAX_CUSTOM_TYPE = {
  * Allows merchants to set tax codes directly on categories for automatic inheritance
  */
 export const CATEGORY_TAX_CUSTOM_TYPE = {
-  key: 'connector-stripe-tax-category',
+  key: process.env.CUSTOM_TYPE_CATEGORY_KEY || 'connector-stripe-tax-category',
   name: {
     en: 'Stripe Tax Category Configuration',
   },
@@ -79,7 +79,7 @@ export const CATEGORY_TAX_CUSTOM_TYPE = {
  * Allows merchants to set tax codes for shipping methods
  */
 export const SHIPPING_TAX_CUSTOM_TYPE = {
-  key: 'connector-stripe-tax-shipping',
+  key: process.env.CUSTOM_TYPE_SHIPPING_KEY || 'connector-stripe-tax-shipping',
   name: {
     en: 'Stripe Tax Shipping Configuration',
   },
@@ -107,7 +107,7 @@ export const SHIPPING_TAX_CUSTOM_TYPE = {
  * Allows merchants to set tax calculation reference for cart and order
  */
 export const CART_TAX_CUSTOM_TYPE = {
-  "key": "connector-stripe-tax-calculation-reference",
+  "key": process.env.CUSTOM_TYPE_CART_KEY || "connector-stripe-tax-calculation-reference",
   "name": {
     "en": "Stripe Tax Calculation Reference"
   },
