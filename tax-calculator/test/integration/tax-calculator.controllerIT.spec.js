@@ -445,7 +445,7 @@ describe('Test tax-calculator.controller.js', () => {
 
   // Disabled because Needs Environment variables and update the cartId from your CTP project
   // This test is kept for reference but should remain disabled
-  xit(`Test against CTP Project`, async () => {
+  /*it(`Test against CTP Project`, async () => {
     let response = {};
     const { body: cartRequestPayload } = await createApiRoot()
       .carts()
@@ -459,7 +459,7 @@ describe('Test tax-calculator.controller.js', () => {
     expect(response.statusCode).toEqual(HTTP_STATUS_SUCCESS_ACCEPTED);
     expect(response.body.amount_total).toEqual(cartRequestPayload.totalPrice.centAmount);
     expect(response.body.tax_breakdown[0].taxability_reason).toEqual('not_subject_to_tax');
-  });
+  });*/
 
   afterAll(() => {
     // Close the application server once all test cases are executed
