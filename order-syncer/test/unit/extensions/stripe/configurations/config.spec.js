@@ -13,8 +13,8 @@ describe('stripe-config.spec', () => {
   });
 
   describe('loadConfig', () => {
-    it('should return config object when TAX_PROVIDER_API_TOKEN is set', () => {
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token_12345';
+    it('should return config object when STRIPE_API_TOKEN is set', () => {
+      process.env.STRIPE_API_TOKEN = 'sk_test_token_12345';
 
       const config = loadConfig();
 
@@ -24,7 +24,7 @@ describe('stripe-config.spec', () => {
     });
 
     it('should return config with different token values', () => {
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_live_token_67890';
+      process.env.STRIPE_API_TOKEN = 'sk_live_token_67890';
 
       const config = loadConfig();
 
@@ -33,20 +33,20 @@ describe('stripe-config.spec', () => {
       });
     });
 
-    it('should throw error when TAX_PROVIDER_API_TOKEN is not provided', () => {
-      delete process.env.TAX_PROVIDER_API_TOKEN;
+    it('should throw error when STRIPE_API_TOKEN is not provided', () => {
+      delete process.env.STRIPE_API_TOKEN;
 
       expect(() => loadConfig()).toThrow('Tax provider API token is not provided.');
     });
 
-    it('should throw error when TAX_PROVIDER_API_TOKEN is empty string', () => {
-      process.env.TAX_PROVIDER_API_TOKEN = '';
+    it('should throw error when STRIPE_API_TOKEN is empty string', () => {
+      process.env.STRIPE_API_TOKEN = '';
 
       expect(() => loadConfig()).toThrow('Tax provider API token is not provided.');
     });
 
-    it('should throw error when TAX_PROVIDER_API_TOKEN is undefined', () => {
-      process.env.TAX_PROVIDER_API_TOKEN = undefined;
+    it('should throw error when STRIPE_API_TOKEN is undefined', () => {
+      process.env.STRIPE_API_TOKEN = undefined;
 
       expect(() => loadConfig()).toThrow('Tax provider API token is not provided.');
     });

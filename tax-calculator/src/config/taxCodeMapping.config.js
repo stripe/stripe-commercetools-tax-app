@@ -21,10 +21,10 @@ class TaxCodeMappingConfig {
       return this.mapping;
     }
 
-    const mappingJson = process.env.TAX_CODE_MAPPING_JSON;
+    const mappingJson = process.env.TAX_CODE_CATEGORY_MAPPING_JSON;
 
     if (!mappingJson) {
-      logger.warn('TAX_CODE_MAPPING_JSON environment variable not set. Tax code lookup will rely on product custom fields only.');
+      logger.warn('TAX_CODE_CATEGORY_MAPPING_JSON environment variable not set. Tax code lookup will rely on product custom fields only.');
       this.mapping = { categories: [] };
       this.lastLoadedAt = Date.now();
       return this.mapping;
@@ -43,11 +43,11 @@ class TaxCodeMappingConfig {
 
       return this.mapping;
     } catch (error) {
-      logger.error('Failed to parse TAX_CODE_MAPPING_JSON', {
+      logger.error('Failed to parse TAX_CODE_CATEGORY_MAPPING_JSON', {
         error: error.message,
         rawValue: mappingJson?.substring(0, 100) // Log first 100 chars for debugging
       });
-      throw new Error(`Invalid TAX_CODE_MAPPING_JSON format: ${error.message}`);
+      throw new Error(`Invalid TAX_CODE_CATEGORY_MAPPING_JSON format: ${error.message}`);
     }
   }
 

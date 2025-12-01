@@ -48,7 +48,7 @@ describe('AddressService', () => {
     
     // Save original env
     originalEnv = { ...process.env };
-    process.env.TAX_PROVIDER_API_TOKEN = 'test_token';
+    process.env.STRIPE_API_TOKEN = 'test_token';
   });
 
   afterEach(() => {

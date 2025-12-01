@@ -7,36 +7,48 @@ deployAs:
       preUndeploy: npm install && npm run connector:pre-undeploy
     configuration:
       standardConfiguration:
-        - key: CTP_PROJECT_KEY
-          description: project key from commercetools composable commerce project
+        - key: CUSTOM_TYPE_PRODUCT_KEY
+          description: Custom type key for product and line item tax code configuration
+          default: 'connector-stripe-tax-product'
           required: true
-        - key: CTP_REGION
-          description: region of commercetools composable commerce project
+        - key: CUSTOM_TYPE_CATEGORY_KEY
+          description: Custom type key for category tax code configuration
+          default: 'connector-stripe-tax-category'
+          required: true
+        - key: CUSTOM_TYPE_SHIPPING_KEY
+          description: Custom type key for shipping method tax code configuration
+          default: 'connector-stripe-tax-shipping'
+          required: true
+        - key: CUSTOM_TYPE_CART_KEY
+          description: Custom type key for cart tax calculation reference
+          default: 'connector-stripe-tax-calculation-reference'
           required: true
         - key: TAX_BEHAVIOR_DEFAULT
           description: Sets the default tax behavior for all tax calculations when no other rules apply
           default: 'exclusive'
-        - key: COUNTRY_TAX_BEHAVIOR_MAPPING
+        - key: TAX_BEHAVIOR_COUNTRY_MAPPING
           description: JSON string (with escaped double quotes) mapping country codes to their default tax behavior
-        - key: TAX_CODE_MAPPING_JSON
+          default: '{"US":"exclusive","CA":"exclusive","DE":"inclusive","FR":"inclusive","GB":"inclusive","AU":"inclusive","IT":"inclusive","ES":"inclusive","NL":"inclusive"}'
+        - key: TAX_CODE_CATEGORY_MAPPING_JSON
           description: JSON string (with escaped double quotes) mapping commercetools categories to Stripe tax codes
+          required: true
         - key: SHIP_FROM_REQUIRED
           description: Whether to require a ship from address for tax calculations (true or false)
           default: 'true'
-        - key: DEFAULT_BUSINESS_COUNTRY
-          description: Default country (ship from address) for tax calculations
-        - key: DEFAULT_BUSINESS_STATE
-          description: Default state (ship from address) for tax calculations
-        - key: DEFAULT_BUSINESS_CITY
-          description: Default city (ship from address) for tax calculations
-        - key: DEFAULT_BUSINESS_POSTAL_CODE
-          description: Default postal code (ship from address) for tax calculations
-        - key: DEFAULT_BUSINESS_LINE1
-          description: Default line 1 (ship from address) for tax calculations
-        - key: DEFAULT_BUSINESS_LINE2
-          description: Default line 2 (ship from address) for tax calculations
-        - key: CHANNEL_PRIORITY
-          description: Comma-separated channel IDs for priority-based selection
+        - key: SHIP_FROM_DEFAULT_BUSINESS_COUNTRY
+          description: Default country for ship from address
+        - key: SHIP_FROM_DEFAULT_BUSINESS_STATE
+          description: Default state for ship from address
+        - key: SHIP_FROM_DEFAULT_BUSINESS_CITY
+          description: Default city for ship from address
+        - key: SHIP_FROM_DEFAULT_BUSINESS_POSTAL_CODE
+          description: Default postal code for ship from address
+        - key: SHIP_FROM_DEFAULT_BUSINESS_LINE1
+          description: Default line 1 for ship from address
+        - key: SHIP_FROM_DEFAULT_BUSINESS_LINE2
+          description: Default line 2 for ship from address
+        - key: SHIP_FROM_CHANNEL_PRIORITY
+          description: Comma-separated channel IDs for priority-based selection (e.g. 'channel-1,channel-2,channel-3')
         - key: ADDRESS_VALIDATION_RATE_LIMIT
           description: Rate limit for address validation in requests per minute
           default: '100'
@@ -45,19 +57,7 @@ deployAs:
           default: '1'
         - key: ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY
           description: Default currency for Stripe verification
-      securedConfiguration:
-        - key: CTP_CLIENT_ID
-          description: client id from commercetools composable commerce project
-          required: true
-        - key: CTP_CLIENT_SECRET
-          description: client secret from commercetools composable commerce project
-          required: true
-        - key: CTP_SCOPE
-          description: scope from commercetools composable commerce project
-          required: true
-        - key: TAX_PROVIDER_API_TOKEN
-          description: API Token for communication between the connector and tax provider
-          required: true
+          default: 'usd'
   - name: order-syncer
     applicationType: event
     endpoint: /orderSyncer
@@ -66,22 +66,30 @@ deployAs:
       preUndeploy: npm install && npm run connector:pre-undeploy
     configuration:
       standardConfiguration:
-        - key: CTP_PROJECT_KEY
-          description: project key from commercetools composable commerce project
+        - key: CUSTOM_TYPE_ORDER_KEY
+          description: Custom type key for order tax calculation reference
+          default: 'connector-stripe-tax-calculation-reference'
           required: true
-        - key: CTP_REGION
-          description: region of commercetools composable commerce project
-          required: true
-      securedConfiguration:
-        - key: CTP_CLIENT_ID
-          description: client id from commercetools composable commerce project
-          required: true
-        - key: CTP_CLIENT_SECRET
-          description: client secret from commercetools composable commerce project
-          required: true
-        - key: CTP_SCOPE
-          description: scope from commercetools composable commerce project
-          required: true
-        - key: TAX_PROVIDER_API_TOKEN
-          description: API Token for communication between the connector and tax provider
-          required: true
+
+inheritAs:
+  configuration:
+    standardConfiguration:
+      - key: CTP_PROJECT_KEY
+        description: Project key from commercetools composable commerce project
+        required: true
+      - key: CTP_REGION
+        description: Region of commercetools composable commerce project
+        required: true
+    securedConfiguration:
+      - key: CTP_CLIENT_ID
+        description: Client id from commercetools composable commerce project
+        required: true
+      - key: CTP_CLIENT_SECRET
+        description: Client secret from commercetools composable commerce project
+        required: true
+      - key: CTP_SCOPE
+        description: Scope from commercetools composable commerce project
+        required: true
+      - key: STRIPE_API_TOKEN
+        description: API Token for communication between the connector and Stripe tax provider
+        required: true

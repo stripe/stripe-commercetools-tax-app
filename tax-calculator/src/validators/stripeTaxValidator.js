@@ -41,6 +41,8 @@ export class StripeTaxValidator {
   /**
    * Validates that Stripe Tax status is 'active'
    * @param {Object} settings - Stripe Tax settings object
+   * @returns {Promise<void>}
+   * @throws {Error} If Stripe Tax is not active or missing required configuration
    */
   async validateTaxStatus(settings) {
     if (settings.status === 'pending') {

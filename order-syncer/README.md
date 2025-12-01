@@ -166,7 +166,7 @@ For that, we also have a template file .env.example with the required environmen
 
 In addition, the following two environment variables in `.env.example` needn't be provided by users during staging or production deployment. 
 ```
-CONNECT_GCP_TOPIC_NAME=<your-gcp-topic-name>
-CONNECT_GCP_PROJECT_ID=<your-gcp-project-id>
+CONNECT_SUBSCRIPTION_TOPIC_NAME=<your-gcp-topic-name>
+CONNECT_SUBSCRIPTION_PROJECT_ID=<your-gcp-project-id>
 ```
 Since they're only required in local development servers. For staging or production environments, connect service sets the Pub/Sub topic name and GCP project ID into these environment variables automatically after the Pub/Sub service has been created in Google Cloud platform. 

@@ -85,7 +85,7 @@ Tax behavior determines how tax is calculated and displayed to customers, which 
 
 The tax behavior is determined using the following priority order:
 
-1. **Country Mapping** - If `COUNTRY_TAX_BEHAVIOR_MAPPING` is configured and the shipping country matches a country in the mapping, that behavior is used
+1. **Country Mapping** - If `TAX_BEHAVIOR_COUNTRY_MAPPING` is configured and the shipping country matches a country in the mapping, that behavior is used
 2. **Merchant Default** - Falls back to `TAX_BEHAVIOR_DEFAULT` value (if configured)
 3. **Stripe Default** - If no behavior is determined, Stripe will use its own default behavior
 
@@ -105,7 +105,7 @@ TAX_BEHAVIOR_DEFAULT=exclusive
 
 > **_NOTE:_** If this environment variable isn't set, then the post-deploy script of the connector will attempt to fetch a default setting from some PSP Tax Providers, such as Stripe. See [Stripe Tax Behavior Settings](https://docs.stripe.com/tax/products-prices-tax-codes-tax-behavior#tax-behavior)
 
-#### COUNTRY_TAX_BEHAVIOR_MAPPING
+#### TAX_BEHAVIOR_COUNTRY_MAPPING
 JSON object mapping country codes to their default tax behavior. This allows different tax behaviors for different markets.
 
 **Optional:** If not provided, the system will skip country-based behavior determination and proceed to merchant default.
@@ -124,7 +124,7 @@ JSON object mapping country codes to their default tax behavior. This allows dif
 
 **Example:**
 ```bash
-COUNTRY_TAX_BEHAVIOR_MAPPING='{"US":"exclusive","DE":"inclusive","FR":"inclusive"}'
+TAX_BEHAVIOR_COUNTRY_MAPPING='{"US":"exclusive","DE":"inclusive","FR":"inclusive"}'
 ```
 
 ## Available Endpoints
@@ -334,26 +334,26 @@ The tax calculator module supports the following environment variables. All vari
 - **CTP_REGION**: commercetools project region
 
 #### Stripe Tax Configuration
-- **TAX_PROVIDER_API_TOKEN**: Stripe API secret key for Stripe Tax
+- **STRIPE_API_TOKEN**: Stripe API secret key for Stripe Tax
 
 ### Optional Variables
 
 #### Tax Behavior Configuration
 - **TAX_BEHAVIOR_DEFAULT**: Default tax behavior (`inclusive` or `exclusive`)
-- **COUNTRY_TAX_BEHAVIOR_MAPPING**: JSON string mapping countries to tax behaviors
+- **TAX_BEHAVIOR_COUNTRY_MAPPING**: JSON string mapping countries to tax behaviors
 
 #### Tax Code Configuration
-- **TAX_CODE_MAPPING_JSON**: JSON string mapping commercetools categories to Stripe tax codes
+- **TAX_CODE_CATEGORY_MAPPING_JSON**: JSON string mapping commercetools categories to Stripe tax codes
 
 #### Ship-From Address Configuration
 - **SHIP_FROM_REQUIRED**: Require ship-from address (`true` or `false`, default: `false`)
-- **DEFAULT_BUSINESS_COUNTRY**: Default business country
-- **DEFAULT_BUSINESS_STATE**: Default business state/province
-- **DEFAULT_BUSINESS_CITY**: Default business city
-- **DEFAULT_BUSINESS_POSTAL_CODE**: Default business postal code
-- **DEFAULT_BUSINESS_LINE1**: Default business street address line 1
-- **DEFAULT_BUSINESS_LINE2**: Default business street address line 2
-- **CHANNEL_PRIORITY**: Comma-separated channel IDs for priority-based selection
+- **SHIP_FROM_DEFAULT_BUSINESS_COUNTRY**: Default business country
+- **SHIP_FROM_DEFAULT_BUSINESS_STATE**: Default business state/province
+- **SHIP_FROM_DEFAULT_BUSINESS_CITY**: Default business city
+- **SHIP_FROM_DEFAULT_BUSINESS_POSTAL_CODE**: Default business postal code
+- **SHIP_FROM_DEFAULT_BUSINESS_LINE1**: Default business street address line 1
+- **SHIP_FROM_DEFAULT_BUSINESS_LINE2**: Default business street address line 2
+- **SHIP_FROM_CHANNEL_PRIORITY**: Comma-separated channel IDs for priority-based selection
 
 #### Address Validation Configuration
 - **ADDRESS_VALIDATION_RATE_LIMIT**: Rate limit for address validation (requests per minute, default: `100`)

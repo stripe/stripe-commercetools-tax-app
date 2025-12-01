@@ -33,7 +33,7 @@ describe('config.util.spec', () => {
       process.env.CTP_PROJECT_KEY = 'test-project';
       process.env.CTP_SCOPE = 'manage_project';
       process.env.CTP_REGION = 'us-central1.gcp';
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
+      process.env.STRIPE_API_TOKEN = 'sk_test_token';
 
       getValidateMessages.mockReturnValue([]);
 
@@ -54,7 +54,7 @@ describe('config.util.spec', () => {
       process.env.CTP_CLIENT_SECRET = '12345678901234567890123456789012';
       process.env.CTP_PROJECT_KEY = 'test-project';
       process.env.CTP_REGION = 'us-central1.gcp';
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
+      process.env.STRIPE_API_TOKEN = 'sk_test_token';
       delete process.env.CTP_SCOPE;
 
       getValidateMessages.mockReturnValue([]);
@@ -69,7 +69,7 @@ describe('config.util.spec', () => {
       process.env.CTP_CLIENT_SECRET = '12345678901234567890123456789012';
       process.env.CTP_PROJECT_KEY = 'test-project';
       process.env.CTP_REGION = 'us-central1.gcp';
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
+      process.env.STRIPE_API_TOKEN = 'sk_test_token';
 
       const validationErrors = [
         { code: 'InValidClientId', message: 'Client id should be 24 characters.' },
@@ -94,7 +94,7 @@ describe('config.util.spec', () => {
       process.env.CTP_CLIENT_SECRET = 'invalid';
       process.env.CTP_PROJECT_KEY = 'test-project';
       process.env.CTP_REGION = 'us-central1.gcp';
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
+      process.env.STRIPE_API_TOKEN = 'sk_test_token';
 
       const validationErrors = [
         { code: 'InValidClientId', message: 'Client id should be 24 characters.' },
@@ -119,7 +119,7 @@ describe('config.util.spec', () => {
       process.env.CTP_PROJECT_KEY = 'test-project';
       process.env.CTP_SCOPE = 'manage_project';
       process.env.CTP_REGION = 'us-central1.gcp';
-      process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
+      process.env.STRIPE_API_TOKEN = 'sk_test_token';
 
       getValidateMessages.mockReturnValue([]);
 
@@ -149,7 +149,7 @@ describe('config.util.spec', () => {
         process.env.CTP_CLIENT_SECRET = '12345678901234567890123456789012';
         process.env.CTP_PROJECT_KEY = 'test-project';
         process.env.CTP_REGION = region;
-        process.env.TAX_PROVIDER_API_TOKEN = 'sk_test_token';
+        process.env.STRIPE_API_TOKEN = 'sk_test_token';
 
         getValidateMessages.mockReturnValue([]);
 

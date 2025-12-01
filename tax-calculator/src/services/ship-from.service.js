@@ -229,7 +229,7 @@ class ShipFromService {
    * @returns {Array} Array of channel IDs in priority order
    */
   getChannelPriority() {
-    const priorityConfig = process.env.CHANNEL_PRIORITY;
+    const priorityConfig = process.env.SHIP_FROM_CHANNEL_PRIORITY;
     
     if (priorityConfig) {
       return priorityConfig.split(',').map(id => id.trim());
@@ -244,12 +244,12 @@ class ShipFromService {
    */
   getDefaultBusinessAddress() {
     return {
-      country: process.env.DEFAULT_BUSINESS_COUNTRY || 'US',
-      state: process.env.DEFAULT_BUSINESS_STATE || 'NY',
-      city: process.env.DEFAULT_BUSINESS_CITY || 'New York',
-      postal_code: process.env.DEFAULT_BUSINESS_POSTAL_CODE || '10001',
-      line1: process.env.DEFAULT_BUSINESS_LINE1 || '',
-      line2: process.env.DEFAULT_BUSINESS_LINE2 || ''
+      country: process.env.SHIP_FROM_DEFAULT_BUSINESS_COUNTRY || 'US',
+      state: process.env.SHIP_FROM_DEFAULT_BUSINESS_STATE || 'NY',
+      city: process.env.SHIP_FROM_DEFAULT_BUSINESS_CITY || 'New York',
+      postal_code: process.env.SHIP_FROM_DEFAULT_BUSINESS_POSTAL_CODE || '10001',
+      line1: process.env.SHIP_FROM_DEFAULT_BUSINESS_LINE1 || '',
+      line2: process.env.SHIP_FROM_DEFAULT_BUSINESS_LINE2 || ''
     };
   }
 
