@@ -218,7 +218,6 @@ describe('AddressService', () => {
         'Stripe verification failed',
         expect.objectContaining({
           requestId: 'test-request-id',
-          error: 'Invalid address',
           code: 'customer_tax_location_invalid',
           type: 'StripeInvalidRequestError'
         })
@@ -381,7 +380,6 @@ describe('AddressService', () => {
         'Stripe verification failed',
         expect.objectContaining({
           requestId: 'test-request-id',
-          error: 'Test error',
           code: 'shipping_address_invalid',
           type: undefined
         })

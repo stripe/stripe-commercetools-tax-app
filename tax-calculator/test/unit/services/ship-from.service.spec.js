@@ -83,13 +83,6 @@ describe('ShipFromService', () => {
         },
         source: 'lineItem.supplyChannel'
       });
-      expect(logger.info).toHaveBeenCalledWith(
-        'Ship-from resolved: lineItem.supplyChannel',
-        expect.objectContaining({
-          lineItemId: 'line-item-1',
-          channelId: 'channel-1'
-        })
-      );
     });
 
     it('should resolve address from inventory.supplyChannel (STRATEGY 2)', async () => {
@@ -140,13 +133,6 @@ describe('ShipFromService', () => {
         },
         source: 'inventory.supplyChannel'
       });
-      expect(logger.info).toHaveBeenCalledWith(
-        'Ship-from resolved: inventory.supplyChannel',
-        expect.objectContaining({
-          lineItemId: 'line-item-2',
-          sku: 'SKU-456'
-        })
-      );
     });
 
     it('should resolve address from default_business (STRATEGY 3) when SHIP_FROM_REQUIRED is true', async () => {
@@ -174,12 +160,6 @@ describe('ShipFromService', () => {
         },
         source: 'default_business'
       });
-      expect(logger.info).toHaveBeenCalledWith(
-        'Ship-from resolved: default_business',
-        expect.objectContaining({
-          lineItemId: 'line-item-3'
-        })
-      );
     });
 
     it('should return not_required when SHIP_FROM_REQUIRED is not true', async () => {
@@ -196,12 +176,6 @@ describe('ShipFromService', () => {
         address: null,
         source: 'not_required'
       });
-      expect(logger.info).toHaveBeenCalledWith(
-        'Ship-from not resolved (optional mode)',
-        expect.objectContaining({
-          lineItemId: 'line-item-4'
-        })
-      );
     });
 
     it('should handle errors gracefully when ship-from is optional', async () => {
@@ -311,10 +285,6 @@ describe('ShipFromService', () => {
 
       expect(result).toEqual(cachedAddress);
       expect(mockApiRoot.channels).not.toHaveBeenCalled();
-      expect(logger.debug).toHaveBeenCalledWith(
-        'Channel address retrieved from cache',
-        { channelId }
-      );
     });
 
     it('should handle API errors gracefully', async () => {

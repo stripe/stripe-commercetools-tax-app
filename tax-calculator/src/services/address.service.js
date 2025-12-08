@@ -44,7 +44,6 @@ class AddressService {
       } catch (error) {
         logger.warn('Stripe verification failed', {
           requestId,
-          error: error.message,
           code: error.code,
           type: error.type,
         });

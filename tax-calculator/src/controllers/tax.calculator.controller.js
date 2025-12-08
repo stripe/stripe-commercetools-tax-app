@@ -11,9 +11,12 @@ import TaxErrorHandlerService from '../services/tax-error-handler.service.js';
 
 export const taxHandler = async (request, response) => {
 
-    logger.info(`request body: ${JSON.stringify(request.body)}`);
     const cartRequestBody = request.body?.resource?.obj;
     if (_.isEmpty(cartRequestBody)) {
+        logger.warn('Tax calculation request rejected: missing cart information', {
+            hasBody: !!request.body,
+            hasResource: !!request.body?.resource
+        });
         return response
             .status(HTTP_STATUS_BAD_REQUEST)
             .send(
@@ -23,12 +26,21 @@ export const taxHandler = async (request, response) => {
                 )
             );
     }
-    logger.info(`Cart request body: ${JSON.stringify(cartRequestBody,null,2)}`);
+
+    logger.info('Tax calculation request received', {
+        cartId: cartRequestBody.id,
+        cartVersion: cartRequestBody.version,
+        customerId: cartRequestBody.customerId ? '[PRESENT]' : null,
+        anonymousId: cartRequestBody.anonymousId ? '[PRESENT]' : null,
+        lineItemsCount: cartRequestBody.lineItems?.length || 0,
+        shippingMode: cartRequestBody.shippingMode,
+        country: cartRequestBody.country,
+        currency: cartRequestBody.totalPrice?.currencyCode,
+        totalAmount: cartRequestBody.totalPrice?.centAmount
+    });
 
     try {
         const result = await taxOrchestratorService.orchestrateTaxCalculation(cartRequestBody);
-
-        logger.info(`Tax calculation completed successfully`);
 
         return response.status(HTTP_STATUS_SUCCESS_ACCEPTED).send(result);
     } catch (err) {

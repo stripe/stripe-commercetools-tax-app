@@ -39,10 +39,6 @@ class ShipFromService {
       if (lineItem.supplyChannel?.id) {
         const address = await this.getAddressFromChannelId(lineItem.supplyChannel.id);
         if (address) {
-          logger.info('Ship-from resolved: lineItem.supplyChannel', {
-            lineItemId: lineItem.id,
-            channelId: lineItem.supplyChannel.id
-          });
           return { address, source: 'lineItem.supplyChannel' };
         }
       }
@@ -51,10 +47,6 @@ class ShipFromService {
       if (lineItem.variant?.sku) {
         const address = await this.getAddressFromInventory(lineItem.variant.sku);
         if (address) {
-          logger.info('Ship-from resolved: inventory.supplyChannel', {
-            lineItemId: lineItem.id,
-            sku: lineItem.variant.sku
-          });
           return { address, source: 'inventory.supplyChannel' };
         }
       }
@@ -64,16 +56,10 @@ class ShipFromService {
       // For digital products or when ship-from is optional, return null
       if (process.env.SHIP_FROM_REQUIRED === 'true') {
         const defaultAddress = this.getDefaultBusinessAddress();
-        logger.info('Ship-from resolved: default_business', {
-          lineItemId: lineItem.id
-        });
         return { address: defaultAddress, source: 'default_business' };
       }
 
       // Ship-from is optional, return null for digital products or when not required
-      logger.info('Ship-from not resolved (optional mode)', {
-        lineItemId: lineItem.id
-      });
       return { address: null, source: 'not_required' };
 
     } catch (error) {
@@ -102,7 +88,6 @@ class ShipFromService {
     // Check cache first
     const cachedAddress = this.getFromCache(channelId);
     if (cachedAddress) {
-      logger.debug('Channel address retrieved from cache', { channelId });
       return cachedAddress;
     }
 
@@ -120,7 +105,6 @@ class ShipFromService {
         // Save to cache
         this.saveToCache(channelId, address);
         
-        logger.debug('Channel address fetched and cached', { channelId });
         return address;
       }
       return null;
@@ -301,10 +285,6 @@ class ShipFromService {
     this.channelCache.set(channelId, {
       address: address,
       timestamp: Date.now()
-    });
-
-    logger.debug('Channel address saved to cache', {
-      channelId
     });
   }
 

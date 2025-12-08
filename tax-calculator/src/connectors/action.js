@@ -18,8 +18,6 @@ export async function createCTPExtension(
       throw new Error('ctpExtensionBaseUrl is required for extension creation');
     }
 
-    logger.info(`Connect tax-integration deployment service url: ${ctpExtensionBaseUrl}`);
-
     const extensionDraft = {
       key: ctpTaxCalculatorExtensionKey,
       destination: {
@@ -276,7 +274,7 @@ export async function createCustomTypes(apiRoot) {
       await addOrUpdateCustomType(apiRoot, customType);
       logger.info(`Custom type '${customType.key}' or field definitions related with Stripe Tax Connector have been created successfully`);
     } catch (error) {
-      logger.error(`Failed to create custom type '${customType.key}' or field definitions related with Stripe Tax Connector:`, error);
+      logger.error(`Failed to create custom type '${customType.key}' or field definitions related with Stripe Tax Connector: ${error.message}`);
       throw new Error(`Custom type creation or field definitions related with Stripe Tax Connector creation failed: ${error.message}`);
     }
   }
@@ -379,7 +377,7 @@ export async function deleteCustomTypes(apiRoot, cleanupCustomTypes = false) {
       await deleteOrUpdateCustomType(apiRoot, customType);
       logger.info(`Field definitions or custom type '${customType.key}' related with Stripe Tax Connector have been removed successfully`);
     } catch (error) {
-      logger.error('Could not remove custom type or field definitions related with Stripe Tax Connector:', error);
+      logger.error(`Could not remove custom type or field definitions related with Stripe Tax Connector: ${error.message}`);
     }
   }
 
@@ -498,7 +496,7 @@ export async function validateCustomTypes(apiRoot) {
 
     return validationResult;
   } catch (error) {
-    logger.error('Custom type validation failed:', error);
+    logger.error(`Custom type validation failed: ${error.message}`);
     validationResult.isValid = false;
     validationResult.errors.push(`Validation failed: ${error.message}`);
     return validationResult;

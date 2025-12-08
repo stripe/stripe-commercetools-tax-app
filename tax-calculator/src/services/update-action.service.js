@@ -66,7 +66,7 @@ class UpdateActionService {
       return updateActions;
       
     } catch (error) {
-      logger.error('Error creating cart update actions from multiple calculations:', error);
+      logger.error(`Error creating cart update actions from multiple calculations: ${error.message}`);
       throw error;
     }
   }
@@ -308,7 +308,7 @@ class UpdateActionService {
     // Remove temporary fields and return final actions
     const finalActions = this.removeTemporaryTaxFields(actionsByKey);
     
-    logger.info(`Created ${finalActions.length} line item tax update actions`);
+    logger.debug(`Created ${finalActions.length} line item tax update actions`);
     return finalActions;
   }
 
@@ -489,7 +489,7 @@ class UpdateActionService {
     // Remove temporary fields and return final actions
     const finalActions = this.removeTemporaryFields(mergedActions);
     
-    logger.info(`Created ${finalActions.length} line item total price update actions`);
+    logger.debug(`Created ${finalActions.length} line item total price update actions`);
     return finalActions;
   }
 
@@ -1027,16 +1027,14 @@ class UpdateActionService {
     let taxBreakdown = this.findByDirectCalculation(
       shippingAmount, 
       shippingTaxAmount, 
-      calculation.shipping_cost.tax_breakdown,
-      'shipping'
+      calculation.shipping_cost.tax_breakdown
     );
     
     if (!taxBreakdown) {
       taxBreakdown = this.findByDirectCalculation(
         shippingAmount, 
         shippingTaxAmount, 
-        calculation.tax_breakdown,
-        'general'
+        calculation.tax_breakdown
       );
     }
     
@@ -1119,7 +1117,7 @@ class UpdateActionService {
   processShippingKey(shippingKey, mappedData, shippingInfo, cart) {
     // Early return if no calculation available
     if (!mappedData?.calculation) {
-      logger.info(`No calculation found for shippingKey ${shippingKey}, creating action with tax = 0`);
+      logger.warn(`No calculation found for shippingKey ${shippingKey}, creating action with tax = 0`);
       const shippingAmount = this.getShippingAmountFromCart(cart, shippingKey);
       return this.createZeroTaxShippingAction(shippingKey, null, cart, shippingAmount);
     }
@@ -1218,16 +1216,14 @@ class UpdateActionService {
     let taxBreakdown = this.findByDirectCalculation(
       shippingAmount, 
       shippingTaxAmount, 
-      calculation.shipping_cost.tax_breakdown,
-      'shipping'
+      calculation.shipping_cost.tax_breakdown
     );
 
     if (!taxBreakdown) {
       taxBreakdown = this.findByDirectCalculation(
         shippingAmount, 
         shippingTaxAmount, 
-        calculation.tax_breakdown,
-        'general'
+        calculation.tax_breakdown
       );
     }
 
@@ -1270,7 +1266,7 @@ class UpdateActionService {
    * @param {String} context - Context for logging
    * @returns {Object|null} Tax breakdown found or null
    */
-  findByDirectCalculation(baseAmount, expectedTaxAmount, taxBreakdowns, context) {
+  findByDirectCalculation(baseAmount, expectedTaxAmount, taxBreakdowns) {
     if (!taxBreakdowns || taxBreakdowns.length === 0) return null;
     
     // Precompute tax rates once
@@ -1286,11 +1282,10 @@ class UpdateActionService {
       })
       .filter(Boolean);
     
-    for (const { breakdown, taxRate, taxRateDetails } of breakdownsWithRates) {
+    for (const { breakdown, taxRate } of breakdownsWithRates) {
       const calculatedTax = Math.round(baseAmount * taxRate);
       
       if (Math.abs(calculatedTax - expectedTaxAmount) <= 1) {
-        logger.info(`Found ${context} tax breakdown by direct calculation: ${taxRateDetails.tax_type} (${taxRateDetails.percentage_decimal}%) - Expected: ${calculatedTax}, Actual: ${expectedTaxAmount}`);
         return breakdown;
       }
     }
@@ -1312,9 +1307,6 @@ class UpdateActionService {
       breakdown = generalBreakdowns?.find(b => b.amount === expectedAmount);
     }
     
-    if (breakdown) {
-      logger.info(`Found tax breakdown by exact amount: ${breakdown.tax_rate_details?.tax_type}`);
-    }
     
     return breakdown;
   }

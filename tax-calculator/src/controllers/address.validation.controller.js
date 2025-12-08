@@ -54,8 +54,7 @@ export async function validateAddressHandler(req, res) {
         // Handle unexpected errors (service should not throw, but just in case)
         logger.error('Unexpected address validation error', {
             requestId,
-            error: error.message,
-            stack: error.stack
+            error: error.message
         });
         
         return res.status(HTTP_STATUS_SERVER_ERROR).json({

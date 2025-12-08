@@ -22,7 +22,7 @@ app.use('/orderSyncer', SyncRoutes);
 
 // Listen the application
 const server = app.listen(PORT, () => {
-  logger.info(`⚡️ Event application listening on port ${PORT}`);
+  logger.info(`Order Syncer service listening on port ${PORT}`);
 });
 
 export default server;

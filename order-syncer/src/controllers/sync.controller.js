@@ -22,9 +22,13 @@ import CustomError from '../errors/custom.error.js';
 export const syncHandler = async (request, response) => {
   try {
     // Receive the Pub/Sub message
-    logger.info(`Received Pub/Sub syncHandler message: ${JSON.stringify(request.body,null,2)}`);
+    logger.info('Received Pub/Sub syncHandler message', { 
+      messageId: request.body?.message?.messageId,
+      publishTime: request.body?.message?.publishTime,
+    });
     const encodedMessageBody = request.body?.message?.data;
     if (!encodedMessageBody) {
+      logger.error('Missing message data from incoming event message.');
       throw new CustomError(
         HTTP_STATUS_SUCCESS_ACCEPTED,
         'Missing message data from incoming event message.'
@@ -40,9 +44,13 @@ export const syncHandler = async (request, response) => {
       await syncOrderToTaxProvider(orderId, cart);
     }
   } catch (err) {
-    logger.error(err);
-    if (err.statusCode) return response.status(err.statusCode).send(err);
-    return response.status(HTTP_STATUS_SERVER_ERROR).send(err);
+    logger.error(`Error in syncHandler: ${err.message}`);
+    if (err.statusCode) return response.status(err.statusCode).send({
+      message: err.message
+    });
+    return response.status(HTTP_STATUS_SERVER_ERROR).send({
+      message: 'Internal server error'
+    });
   }
 
   // Return the response for the client
@@ -69,7 +77,7 @@ async function syncOrderToTaxProvider(orderId, cart) {
   );
 
   logger.info(
-    `Tax transactions from Stripe of order ${orderId} : ${taxTransactions.map(txn => txn.id).join(', ')}`
+    `Tax transactions from Stripe of order ${orderId} are created successfully: ${taxTransactions.map(txn => txn.id).join(', ')}`
   );
 
   if (taxTransactions.length > 0) {

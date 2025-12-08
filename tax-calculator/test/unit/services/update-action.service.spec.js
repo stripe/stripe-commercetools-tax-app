@@ -109,8 +109,7 @@ describe('UpdateActionService', () => {
         updateActionService.createCartUpdateActionsFromMultipleCalculations(null);
       }).toThrow();
       expect(logger.error).toHaveBeenCalledWith(
-        'Error creating cart update actions from multiple calculations:',
-        expect.any(Error)
+        expect.stringContaining('Error creating cart update actions from multiple calculations:')
       );
     });
   });
@@ -295,7 +294,7 @@ describe('UpdateActionService', () => {
       expect(result1.length).toBeGreaterThan(0);
       expect(result1[0].action).toBe('setLineItemTaxAmount');
       expect(result1[0].lineItemId).toBe('line-item-1');
-      expect(logger.info).toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalled();
 
       // Test combining duplicates
       const duplicateCalculations = [
@@ -526,7 +525,7 @@ describe('UpdateActionService', () => {
       expect(result[1].externalTotalPrice.totalPrice.centAmount).toBe(2000);
       expect(result[1].externalTotalPrice.price.centAmount).toBe(2000); // 2000 / 1
       
-      expect(logger.info).toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalled();
     });
 
     it('should combine duplicates when same lineItemId + shippingKey appears in multiple calculations', () => {
@@ -909,12 +908,10 @@ describe('UpdateActionService', () => {
       const result1 = updateActionService.findByDirectCalculation(
         baseAmount,
         expectedTaxAmount,
-        taxBreakdowns,
-        'test'
+        taxBreakdowns
       );
       expect(result1).toBeDefined();
       expect(result1.tax_rate_details.tax_type).toBe('sales_tax');
-      expect(logger.info).toHaveBeenCalled();
 
       // Test no match
       const taxBreakdownsNoMatch = [
@@ -929,16 +926,14 @@ describe('UpdateActionService', () => {
       expect(updateActionService.findByDirectCalculation(
         baseAmount,
         expectedTaxAmount,
-        taxBreakdownsNoMatch,
-        'test'
+        taxBreakdownsNoMatch
       )).toBeNull();
 
       // Test tolerance of 1 cent
       expect(updateActionService.findByDirectCalculation(
         baseAmount,
         expectedTaxAmount + 1,
-        taxBreakdowns,
-        'test'
+        taxBreakdowns
       )).toBeDefined();
 
       // Test findByExactAmount
@@ -961,7 +956,6 @@ describe('UpdateActionService', () => {
       );
       expect(result2).toBeDefined();
       expect(result2.amount).toBe(50);
-      expect(logger.info).toHaveBeenCalled();
 
       // Test finding in general breakdowns
       const result3 = updateActionService.findByExactAmount(

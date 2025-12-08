@@ -155,8 +155,7 @@ describe('TaxErrorHandlerService', () => {
 
       expect(result).toBeDefined();
       expect(logger.error).toHaveBeenCalledWith(
-        'Unexpected error during tax calculation',
-        error
+        'Unexpected error during tax calculation: Generic error'
       );
     });
   });
@@ -470,8 +469,7 @@ describe('TaxErrorHandlerService', () => {
       expect(statusSpy).toHaveBeenCalledWith(404);
       expect(sendSpy).toHaveBeenCalledWith(error);
       expect(logger.error).toHaveBeenCalledWith(
-        'Unexpected error during tax calculation',
-        error
+        'Unexpected error during tax calculation: Error with status'
       );
     });
 
@@ -484,8 +482,7 @@ describe('TaxErrorHandlerService', () => {
       expect(statusSpy).toHaveBeenCalledWith(HTTP_STATUS_SERVER_ERROR);
       expect(sendSpy).toHaveBeenCalledWith(error);
       expect(logger.error).toHaveBeenCalledWith(
-        'Unexpected error during tax calculation',
-        error
+        'Unexpected error during tax calculation: Generic error'
       );
     });
   });
