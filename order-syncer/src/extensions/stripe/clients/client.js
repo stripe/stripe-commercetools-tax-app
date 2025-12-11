@@ -1,33 +1,51 @@
 import Stripe from 'stripe';
 import { loadConfig } from '../configurations/config.js';
-import { ORDER_TAX_FIELD_NAMES } from '../../../connectors/customTypes.js';
+import { logger } from '../../../utils/logger.util.js';
 
 let stripeClient;
 
 /**
- * Create a new Stripe client.
+ * Get the Stripe client instance.
  * @returns {Stripe} The Stripe client.
  */
-function createClient() {
-  const apiToken = loadConfig().taxProviderApiToken;
-  return new Stripe(apiToken);
+function getStripeClient() {
+  if (!stripeClient) {
+    stripeClient = new Stripe(loadConfig().taxProviderApiToken);
+  }
+  return stripeClient;
+}
+
+/**
+ * Get tax transaction ID from Tax Association.
+ * @param {string} paymentIntentId - The PaymentIntent ID.
+ * @returns {Promise<string|null>} Transaction ID or null.
+ */
+export async function getTransactionFromTaxAssociation(paymentIntentId) {
+  try {
+    const association = await getStripeClient().tax.associations.find({
+      payment_intent: paymentIntentId,
+    });
+    
+    const committed = association.tax_transaction_attempts?.find(a => a.status === 'committed');
+    return committed?.committed?.transaction || null;
+  } catch (error) {
+    if (error.code !== 'resource_missing' && error.statusCode !== 404) {
+      logger.warn(`Error retrieving Tax Association: ${error.message}`);
+    }
+    return null;
+  }
 }
 
 /**
  * Create a new tax transaction.
  * @param {string} orderId - The ID of the order.
- * @param {object} cart - The cart object.
+ * @param {Array<string>} calculationReferences - The calculation references.
  * @returns {Promise<Array<object>>} The tax transactions.
  */
-export default async function createTaxTransaction(orderId, cart) {
-  if (!stripeClient) stripeClient = createClient();
+export async function createTaxTransactions(orderId, calculationReferences) {
+  const client = getStripeClient();
 
-  const calculationReferences = cart?.custom?.fields?.[ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES];
   const taxTransactions = [];
-
-  if (!calculationReferences || !Array.isArray(calculationReferences) || calculationReferences.length === 0) {
-    throw new Error('Missing calculation references.');
-  }
 
   for (const calculationReference of calculationReferences) {
     const txnCreateFromCalculationParams = {
@@ -38,9 +56,28 @@ export default async function createTaxTransaction(orderId, cart) {
       }
     };
 
-    const response = await stripeClient.tax.transactions.createFromCalculation(txnCreateFromCalculationParams);
+    const response = await client.tax.transactions.createFromCalculation(txnCreateFromCalculationParams);
     taxTransactions.push(response);
   }
 
   return taxTransactions;
+}
+
+/**
+ * Update PaymentIntent metadata with transaction IDs.
+ * @param {string} paymentIntentId - The PaymentIntent ID.
+ * @param {Array<string>} transactionIds - Transaction IDs.
+ * @returns {Promise<void>} The updated PaymentIntent metadata.
+ */
+export async function updatePaymentIntentMetadata(paymentIntentId, transactionIds) {
+  try {
+    await getStripeClient().paymentIntents.update(paymentIntentId, {
+      metadata: {
+        tax_transactions: transactionIds.join(', ')
+      },
+    });
+    logger.info(`Updated PaymentIntent ${paymentIntentId} metadata`);
+  } catch (error) {
+    logger.warn(`Could not update PaymentIntent metadata: ${error.message}`);
+  }
 }

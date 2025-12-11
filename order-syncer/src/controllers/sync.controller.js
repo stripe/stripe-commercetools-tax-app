@@ -1,15 +1,20 @@
 import { logger } from '../utils/logger.util.js';
 import { doValidation } from '../validators/order-change.validators.js';
 import { decodeToJson } from '../utils/decoder.util.js';
-import { getCartByOrderId } from '../clients/query.client.js';
+import { getOrderWithPaymentInfo } from '../clients/query.client.js';
 import { updateOrderTaxTxn } from '../clients/update.client.js';
 import {
   HTTP_STATUS_SUCCESS_NO_CONTENT,
   HTTP_STATUS_SERVER_ERROR,
   HTTP_STATUS_SUCCESS_ACCEPTED,
 } from '../constants/http.status.constants.js';
-import createTaxTransaction from '../extensions/stripe/clients/client.js';
+import { 
+  createTaxTransactions, 
+  getTransactionFromTaxAssociation, 
+  updatePaymentIntentMetadata
+} from '../extensions/stripe/clients/client.js';
 import CustomError from '../errors/custom.error.js';
+import { ORDER_TAX_FIELD_NAMES } from '../connectors/customTypes.js';
 
 /**
  * Sync handler for the Order Syncer
@@ -17,7 +22,7 @@ import CustomError from '../errors/custom.error.js';
  * 
  * @param {Object} request - The request object
  * @param {Object} response - The response object
- * @returns {Promise<Object>} The response object
+ * @returns {Promise<void>} The response object
  */
 export const syncHandler = async (request, response) => {
   try {
@@ -39,9 +44,10 @@ export const syncHandler = async (request, response) => {
     doValidation(messageBody);
 
     const orderId = messageBody?.resource?.id;
-    const cart = await getCartByOrderId(orderId);
-    if (cart) {
-      await syncOrderToTaxProvider(orderId, cart);
+    const order = await getOrderWithPaymentInfo(orderId);
+    logger.info(`Order with payment info: ${JSON.stringify(order)}`);
+    if (order) {
+      await syncOrderToTaxProvider(orderId, order);
     }
   } catch (err) {
     logger.error(`Error in syncHandler: ${err.message}`);
@@ -58,29 +64,38 @@ export const syncHandler = async (request, response) => {
 };
 
 /**
- * Sync to the tax provider
- * This function is called to sync the order to the tax provider
- * 
- * @param {string} orderId - The order ID
- * @param {Object} cart - The cart object
- * @returns {Promise<void>} The response object
+ * Sync order to tax provider.
+ * @param {string} orderId - The order ID.
+ * @param {object} order - The order object.
+ * @returns {Promise<void>} The updated order tax transactions.
  */
-async function syncOrderToTaxProvider(orderId, cart) {
-  const taxTransactions = await createTaxTransaction(orderId, cart).catch(
-    (error) => {
-      throw new CustomError(
-        HTTP_STATUS_SUCCESS_ACCEPTED,
-        `Error from extension : ${error.message}`,
-        error
-      );
+async function syncOrderToTaxProvider(orderId, order) {
+  const calcRefs = order?.custom?.fields?.[ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES] || [];
+  
+  if (calcRefs.length === 0) {
+    logger.warn(`Order ${orderId} has no calculation references. Skipping.`);
+    return;
+  }
+
+  const paymentIntentId = order?.paymentInfo?.payments[0]?.obj?.interfaceId;
+
+  // Single calculation: try Tax Association first
+  if (calcRefs.length === 1 && paymentIntentId) {
+    const existingTxnId = await getTransactionFromTaxAssociation(paymentIntentId);
+    
+    if (existingTxnId) {
+      logger.info(`Found existing transaction ${existingTxnId} via Tax Association`);
+      await updateOrderTaxTxn([{ id: existingTxnId }], orderId);
+      return;
     }
-  );
+  }
 
-  logger.info(
-    `Tax transactions from Stripe of order ${orderId} are created successfully: ${taxTransactions.map(txn => txn.id).join(', ')}`
-  );
+  // Create new transactions
+  const transactions = await createTaxTransactions(orderId, calcRefs);
+  await updateOrderTaxTxn(transactions, orderId);
 
-  if (taxTransactions.length > 0) {
-    await updateOrderTaxTxn(taxTransactions, orderId);
+  // Sync to PaymentIntent if available
+  if (paymentIntentId && transactions.length > 0) {
+    await updatePaymentIntentMetadata(paymentIntentId, transactions.map(t => t.id));
   }
 }
