@@ -8,7 +8,7 @@ import { HTTP_STATUS_SUCCESS_ACCEPTED } from '../../src/constants/http.status.co
 
 // Mock the clients that make external API calls
 jest.mock('../../src/clients/query.client.js', () => ({
-  getCartByOrderId: jest.fn().mockRejectedValue(
+  getOrderWithPaymentInfo: jest.fn().mockRejectedValue(
     new (class CustomError extends Error {
       constructor(statusCode, message) {
         super(message);
