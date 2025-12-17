@@ -10,7 +10,7 @@ import {
 } from '../constants/http.status.constants.js';
 import { 
   createTaxTransactions, 
-  getTransactionFromTaxAssociation, 
+  getTransactionFromTaxCalculation, 
   updatePaymentIntentMetadata
 } from '../extensions/stripe/clients/client.js';
 import CustomError from '../errors/custom.error.js';
@@ -45,7 +45,11 @@ export const syncHandler = async (request, response) => {
 
     const orderId = messageBody?.resource?.id;
     const order = await getOrderWithPaymentInfo(orderId);
-    logger.info(`Order with payment info: ${JSON.stringify(order)}`);
+    logger.info(`Payment data for order ${orderId}:`, {
+      calculationReferences: order?.custom?.fields?.[ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES] || [],
+      paymentIntentId: order?.paymentInfo?.payments[0]?.obj?.interfaceId
+    });
+
     if (order) {
       await syncOrderToTaxProvider(orderId, order);
     }
@@ -71,28 +75,31 @@ export const syncHandler = async (request, response) => {
  */
 async function syncOrderToTaxProvider(orderId, order) {
   const calcRefs = order?.custom?.fields?.[ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES] || [];
+  const paymentIntentId = order?.paymentInfo?.payments[0]?.obj?.interfaceId;
+  let transactions = [];
   
   if (calcRefs.length === 0) {
     logger.warn(`Order ${orderId} has no calculation references. Skipping.`);
     return;
   }
 
-  const paymentIntentId = order?.paymentInfo?.payments[0]?.obj?.interfaceId;
+  // Single calculation: check if transaction already exists
+  if (calcRefs.length === 1) {
+    logger.info(`Case single calculation.`);
 
-  // Single calculation: try Tax Association first
-  if (calcRefs.length === 1 && paymentIntentId) {
-    const existingTxnId = await getTransactionFromTaxAssociation(paymentIntentId);
-    
-    if (existingTxnId) {
-      logger.info(`Found existing transaction ${existingTxnId} via Tax Association`);
-      await updateOrderTaxTxn([{ id: existingTxnId }], orderId);
-      return;
+    const transaction = await getTransactionFromTaxCalculation(calcRefs[0], orderId, paymentIntentId);
+    if (transaction?.id) {
+      transactions.push(transaction);
+      logger.info(`Found existing transaction with ID: ${transaction.id}`);
+      await updateOrderTaxTxn(transactions, orderId);
     }
-  }
+  } else {
+    // Multiple calculations: create new transactions
+    logger.info(`Case multiple calculations.`);
 
-  // Create new transactions
-  const transactions = await createTaxTransactions(orderId, calcRefs);
-  await updateOrderTaxTxn(transactions, orderId);
+    transactions = await createTaxTransactions(orderId, calcRefs, paymentIntentId);
+    await updateOrderTaxTxn(transactions, orderId);
+  }
 
   // Sync to PaymentIntent if available
   if (paymentIntentId && transactions.length > 0) {

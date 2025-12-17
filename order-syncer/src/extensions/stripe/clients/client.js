@@ -16,33 +16,43 @@ function getStripeClient() {
 }
 
 /**
- * Get tax transaction ID from Tax Association.
- * @param {string} paymentIntentId - The PaymentIntent ID.
- * @returns {Promise<string|null>} Transaction ID or null.
+ * Get tax transaction ID from Tax Calculation.
+ * @param {string} calculationReference - The calculation reference.
+ * @param {string} orderId - The order ID.
+ * @param {string} paymentIntentId - The payment intent ID.
+ * @returns {Promise<object>} Transaction object.
  */
-export async function getTransactionFromTaxAssociation(paymentIntentId) {
+export async function getTransactionFromTaxCalculation(calculationReference, orderId, paymentIntentId) {
+  let transaction = {};
+
   try {
-    const association = await getStripeClient().tax.associations.find({
-      payment_intent: paymentIntentId,
+    transaction = await getStripeClient().tax.transactions.createFromCalculation({
+      calculation: calculationReference,
+      reference: calculationReference,
+      metadata: {
+        ct_order_id: orderId,
+        paymentIntentId: paymentIntentId
+      }
     });
-    
-    const committed = association.tax_transaction_attempts?.find(a => a.status === 'committed');
-    return committed?.committed?.transaction || null;
   } catch (error) {
+    transaction.id = error.message.match(/tax transaction (tax_\w+)/)?.[1];
+    
     if (error.code !== 'resource_missing' && error.statusCode !== 404) {
-      logger.warn(`Error retrieving Tax Association: ${error.message}`);
+      logger.warn(`Error retrieving Tax Transaction: ${error.message}`);
     }
-    return null;
   }
+
+  return transaction;
 }
 
 /**
  * Create a new tax transaction.
  * @param {string} orderId - The ID of the order.
  * @param {Array<string>} calculationReferences - The calculation references.
+ * @param {string} paymentIntentId - The payment intent ID.
  * @returns {Promise<Array<object>>} The tax transactions.
  */
-export async function createTaxTransactions(orderId, calculationReferences) {
+export async function createTaxTransactions(orderId, calculationReferences, paymentIntentId) {
   const client = getStripeClient();
 
   const taxTransactions = [];
@@ -50,9 +60,10 @@ export async function createTaxTransactions(orderId, calculationReferences) {
   for (const calculationReference of calculationReferences) {
     const txnCreateFromCalculationParams = {
       calculation: calculationReference,
-      reference: orderId,
+      reference: calculationReference,
       metadata: {
-        ct_order_id: orderId
+        ct_order_id: orderId,
+        paymentIntentId: paymentIntentId
       }
     };
 
@@ -76,7 +87,7 @@ export async function updatePaymentIntentMetadata(paymentIntentId, transactionId
         tax_transactions: transactionIds.join(', ')
       },
     });
-    logger.info(`Updated PaymentIntent ${paymentIntentId} metadata`);
+    logger.info(`Updated PaymentIntent ${paymentIntentId} with metadata: ${transactionIds.join(', ')}`);
   } catch (error) {
     logger.warn(`Could not update PaymentIntent metadata: ${error.message}`);
   }
