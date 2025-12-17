@@ -68,14 +68,9 @@ class TaxOrchestratorService {
       // STEP 3: Group line items by ship-from address
       const shipFromGroups = await this.groupLineItemsByShipFrom(cart);
       
-      logger.info('Ship-from groups created', {
+      logger.debug('Ship-from groups created', {
         groupsCount: shipFromGroups.length,
-        groups: shipFromGroups.map(g => ({
-          address: g.shipFromAddress,
-          source: g.source,
-          lineItemsCount: g.lineItems.length,
-          hasShipFrom: !!g.shipFromAddress
-        }))
+        sources: shipFromGroups.map(g => g.source)
       });
 
       // STEP 4: For each group, create separate requests by shippingKey
@@ -86,7 +81,7 @@ class TaxOrchestratorService {
         categoriesMap
       );
       
-      logger.info('Stripe requests prepared', {
+      logger.debug('Stripe requests prepared', {
         requestsCount: requests.length,
         shippingMethodsCount: shippingInfoGroups.length
       });
@@ -523,8 +518,19 @@ class TaxOrchestratorService {
    * @returns {Promise<Array>} Array of Stripe calculation responses
    */
   async executeTaxCalculations(requests, stripeClient) {
-    logger.info(`Executing ${requests.length} tax calculations in parallel`);
-    logger.info('Requests', { requests: requests });
+    logger.info('Executing Stripe tax calculations', {
+      requestCount: requests.length,
+      requests: requests.map((req, index) => ({
+          index,
+          shippingKey: req.shippingKey || 'single',
+          lineItemsCount: req.line_items?.length || 0,
+          hasShippingCost: !!req.shipping_cost,
+          shippingAmount: req.shipping_cost?.amount || 0,
+          currency: req.currency,
+          customerCountry: req.customer_details?.address?.country,
+          shipFromCountry: req.ship_from_details?.address?.country || 'not_set'
+      }))
+    });
     
     const calculations = await Promise.allSettled(
       requests.map((request, index) => {
@@ -545,22 +551,38 @@ class TaxOrchestratorService {
     const failed = calculations.filter(r => r.status === 'rejected');
     
     if (failed.length > 0) {
-      logger.warn(`${failed.length} tax calculations failed`, {
-        errors: failed.map(f => f.reason?.message)
+      logger.warn('Some Stripe tax calculations failed', {
+          failedCount: failed.length,
+          totalRequests: requests.length,
+          errors: failed.map((f, index) => ({
+              requestIndex: index,
+              errorType: f.reason?.type,
+              errorCode: f.reason?.code
+          }))
       });
-    }
+  }
     
     if (successful.length === 0) {
       throw new Error('All tax calculations failed');
     }
     
-    const calculationIds = successful.map(calc => calc.id);
-    logger.info('Tax calculations completed successfully', {
+    logger.info('Stripe tax calculations completed', {
       successfulCount: successful.length,
       failedCount: failed.length,
-      calculationIds: calculationIds,
-      successful: successful
-    });
+      totalRequests: requests.length,
+      calculations: successful.map((calc, index) => ({
+          index,
+          calculationId: calc.id,
+          currency: calc.currency,
+          amountTotal: calc.amount_total,
+          taxAmountExclusive: calc.tax_amount_exclusive,
+          taxAmountInclusive: calc.tax_amount_inclusive,
+          lineItemsCount: calc.line_items?.data?.length || 0,
+          hasShippingCost: !!calc.shipping_cost,
+          shippingTax: calc.shipping_cost?.amount_tax || 0,
+          taxBreakdownCount: calc.tax_breakdown?.length || 0
+      }))
+  });
     
     return successful;
   }

@@ -52,13 +52,6 @@ class CategoryService {
       return new Map();
     }
 
-    logger.info('Fetching categories for products', {
-      totalProducts: uniqueProductIds.length,
-      staged,
-      locale: locale || 'default',
-      useCache
-    });
-
     // Check cache if enabled
     let categoriesMap = new Map();
     let productIdsToFetch = uniqueProductIds;
@@ -162,12 +155,6 @@ class CategoryService {
     productProjections.forEach(projection => {
       const categories = this.extractCategories(projection);
       categoriesMap.set(projection.id, categories);
-    });
-
-    logger.info('Categories fetched from API', {
-      requested: productIds.length,
-      fetched: categoriesMap.size,
-      failed: productIds.length - categoriesMap.size
     });
 
     return categoriesMap;

@@ -43,11 +43,8 @@ class TaxCodeMappingConfig {
 
       return this.mapping;
     } catch (error) {
-      logger.error('Failed to parse TAX_CODE_CATEGORY_MAPPING_JSON', {
-        error: error.message,
-        rawValue: mappingJson?.substring(0, 100) // Log first 100 chars for debugging
-      });
-      throw new Error(`Invalid TAX_CODE_CATEGORY_MAPPING_JSON format: ${error.message}`);
+      logger.error(`Invalid TAX_CODE_CATEGORY_MAPPING_JSON format: ${error.message}`);
+      throw new Error(error.message);
     }
   }
 

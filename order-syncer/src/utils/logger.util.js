@@ -1,3 +1,1 @@
-import { createApplicationLogger } from '@commercetools-backend/loggers';
-
-export const logger = createApplicationLogger();
+export { logger } from './async-logger.utils.js';

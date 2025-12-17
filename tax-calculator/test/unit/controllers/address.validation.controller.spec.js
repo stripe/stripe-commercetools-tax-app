@@ -194,8 +194,7 @@ describe('AddressValidationController', () => {
         'Unexpected address validation error',
         {
           requestId: 'test-request-id',
-          error: 'Service error',
-          stack: expect.any(String)
+          error: 'Service error'
         }
       );
 

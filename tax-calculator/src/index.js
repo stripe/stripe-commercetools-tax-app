@@ -22,8 +22,7 @@ app.use('/taxCalculator', addressValidationRouter);
 
 // Listen the application
 const server = app.listen(PORT, () => {
-  logger.info(`Tax Calculator service listening on port ${PORT}`);
-  logger.info('Tax Calculator service started successfully');
+  logger.info(`Tax Calculator service listening on port ${PORT} and started successfully`);
 });
 
 export default server;

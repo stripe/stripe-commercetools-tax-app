@@ -90,14 +90,6 @@ describe('TaxCodeService', () => {
 
       const result1 = taxCodeService.getTaxCodeForProduct(cartLineItem, productCategories1);
       expect(result1).toBe('txcd_11111111');
-      expect(logger.info).toHaveBeenCalledWith(
-        'Tax code assigned',
-        expect.objectContaining({
-          productId: 'product-1',
-          taxCode: 'txcd_11111111',
-          source: 'custom_type_category'
-        })
-      );
 
       // Test category without tax code (parent hierarchy is NOT searched)
       const productCategories2 = [

@@ -27,7 +27,7 @@ class TaxCodeService {
    * @throws {TaxCodeNotFoundError} If no tax code can be determined
    */
   getTaxCodeForProduct(cartLineItem, productCategories) {
-    logger.debug('getTaxCodeForProduct', { cartLineItem });
+    logger.debug('getTaxCodeForProduct', { lineItemId: cartLineItem?.id, productId: cartLineItem?.productId });
     if (!cartLineItem) {
       throw new Error('Cart line item is required');
     }
@@ -36,7 +36,7 @@ class TaxCodeService {
       // STRATEGY 1: Check category custom type
       const customTypeCategoryTaxCode = this.getCustomTypeCategoryTaxCode(productCategories || []);
       if (customTypeCategoryTaxCode) {
-        this.logTaxCodeDecision(cartLineItem, customTypeCategoryTaxCode, 'custom_type_category');
+        //this.logTaxCodeDecision(cartLineItem, customTypeCategoryTaxCode, 'custom_type_category');
         return customTypeCategoryTaxCode;
       }
 
@@ -72,7 +72,6 @@ class TaxCodeService {
       if (error instanceof TaxCodeNotFoundError) {
         logger.warn('Tax code not found for product', {
           productId: cartLineItem.productId,
-          productName: cartLineItem.name,
           categories: (cartLineItem.categories || []).map(cat => cat.name || cat.key)
         });
         throw error;

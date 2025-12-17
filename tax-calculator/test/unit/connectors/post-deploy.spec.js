@@ -85,9 +85,10 @@ describe('tax-calculator.controller', () => {
       ];
 
       for (const invalidBody of invalidBodies) {
+        jest.clearAllMocks();
         mockRequest.body = invalidBody;
-        _.isEmpty.mockReturnValue(invalidBody === null || invalidBody === undefined || 
-          (typeof invalidBody === 'object' && Object.keys(invalidBody).length === 0));
+        // All these cases should result in isEmpty returning true for cartRequestBody
+        _.isEmpty.mockReturnValue(true);
 
         await taxHandler(mockRequest, mockResponse);
 
@@ -114,9 +115,14 @@ describe('tax-calculator.controller', () => {
       );
       expect(mockResponse.status).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_ACCEPTED);
       expect(mockResponse.send).toHaveBeenCalledWith(mockResult);
-      expect(logger.info).toHaveBeenCalledWith('Tax calculation completed successfully');
-      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('request body:'));
-      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Cart request body:'));
+      expect(logger.info).toHaveBeenCalledWith(
+        'Tax calculation request received',
+        expect.objectContaining({
+          cartId: 'cart-1',
+          shippingMode: 'Single',
+          lineItemsCount: 1
+        })
+      );
     });
 
     it('should handle errors and delegate to error handler', async () => {

@@ -38,6 +38,8 @@ export async function createChangedOrderSubscription(
       },
     })
     .execute();
+
+  logger.info(`Subscription created successfully in project ${projectId} with topic ${topicName}`);
 }
 
 /**
@@ -74,6 +76,8 @@ export async function deleteChangedOrderSubscription(
         },
       })
       .execute();
+    
+    logger.info(`Subscription deleted successfully with key ${ctpOrderChangeSubscriptionKey}`);
   }
 }
 
@@ -84,17 +88,15 @@ export async function deleteChangedOrderSubscription(
  * @param {Object} apiRoot - commercetools API client
  */
 export async function createCustomTypes(apiRoot) {
-  logger.info('Creating custom types for Order Syncer...');
+  logger.info('Creating Custom Types for Order Syncer');
 
   try {
     await addOrUpdateCustomType(apiRoot, ORDER_TAX_CUSTOM_TYPE);
-    logger.info(`Custom type '${ORDER_TAX_CUSTOM_TYPE.key}' or field definitions related with Order Syncer have been created successfully`);
+    logger.info(`Custom Type '${ORDER_TAX_CUSTOM_TYPE.key}' or field definitions related with Order Syncer have been created successfully`);
   } catch (error) {
-    logger.error(`Failed to create custom type '${ORDER_TAX_CUSTOM_TYPE.key}' or field definitions related with Order Syncer:`, error);
+    logger.error(`Failed to create custom type '${ORDER_TAX_CUSTOM_TYPE.key}' or field definitions related with Order Syncer: ${error.message}`);
     throw new Error(`Custom type creation or field definitions related with Order Syncer creation failed: ${error.message}`);
   }
-
-  logger.info('Custom types for Order Syncer created successfully');
 } 
 
 /**
@@ -181,20 +183,20 @@ async function getCustomTypesByResourceTypeId(apiRoot, resourceTypeId) {
  */
 export async function deleteCustomTypes(apiRoot, cleanupCustomTypes = false) {
   if (!cleanupCustomTypes) {
-    logger.info('Custom type cleanup disabled. Custom types will remain in commercetools.');
+    logger.info('Custom Type cleanup disabled. Custom Types will remain in commercetools.');
     return;
   }
 
-  logger.info('Cleaning up custom types...');
+  logger.info('Cleaning up Custom Types');
 
   try {
     await deleteOrUpdateCustomType(apiRoot, ORDER_TAX_CUSTOM_TYPE);
-    logger.info(`Field definitions or custom type '${ORDER_TAX_CUSTOM_TYPE.key}' related with Order Syncer have been removed successfully`);
+    logger.info(`Field definitions or Custom Type '${ORDER_TAX_CUSTOM_TYPE.key}' related with Order Syncer have been removed successfully`);
   } catch (error) {
-    logger.error('Could not remove custom type or field definitions related with Order Syncer:', error);
+    logger.error(`Could not remove custom type or field definitions related with Order Syncer: ${error.message}`);
   }
 
-  logger.info('Custom types for Order Syncer cleanup completed');
+  logger.info('Custom Types for Order Syncer cleanup completed');
 }
 
 /**

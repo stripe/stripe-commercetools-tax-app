@@ -187,7 +187,7 @@ class TaxErrorHandlerService {
    * @returns {Object}
    */
   static handleOtherErrors(error, response) {
-    logger.error('Unexpected error during tax calculation', error);
+    logger.error(`Unexpected error during tax calculation: ${error.message}`);
     if (error.statusCode) return response.status(error.statusCode).send(error);
     return response.status(HTTP_STATUS_SERVER_ERROR).send(error);
   }

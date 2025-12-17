@@ -146,15 +146,6 @@ describe('CategoryService', () => {
           })
         })
       );
-      expect(logger.info).toHaveBeenCalledWith(
-        'Fetching categories for products',
-        expect.objectContaining({
-          totalProducts: 1,
-          staged: true,
-          locale: 'en-US',
-          useCache: true
-        })
-      );
     });
 
     it('should handle API errors and log them', async () => {
@@ -244,14 +235,6 @@ describe('CategoryService', () => {
       expect(result.size).toBe(2);
       expect(result.get('product-1')).toHaveLength(2);
       expect(result.get('product-2')).toHaveLength(1);
-      expect(logger.info).toHaveBeenCalledWith(
-        'Categories fetched from API',
-        expect.objectContaining({
-          requested: 2,
-          fetched: 2,
-          failed: 0
-        })
-      );
     });
 
     it('should handle products with no categories or products not found in results', async () => {
@@ -273,14 +256,6 @@ describe('CategoryService', () => {
 
       expect(result.size).toBe(1);
       expect(result.get('product-1')).toEqual([]);
-      expect(logger.info).toHaveBeenCalledWith(
-        'Categories fetched from API',
-        expect.objectContaining({
-          requested: 2,
-          fetched: 1,
-          failed: 1
-        })
-      );
     });
   });
 
