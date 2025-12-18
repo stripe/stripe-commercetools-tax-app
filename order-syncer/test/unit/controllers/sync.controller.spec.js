@@ -13,6 +13,7 @@ jest.mock('../../../src/utils/logger.util.js', () => ({
   logger: {
     info: jest.fn(),
     error: jest.fn(),
+    warn: jest.fn(),
   },
 }));
 
@@ -25,7 +26,7 @@ jest.mock('../../../src/validators/order-change.validators.js', () => ({
 }));
 
 jest.mock('../../../src/clients/query.client.js', () => ({
-  getCartByOrderId: jest.fn(),
+  getOrderWithPaymentInfo: jest.fn(),
 }));
 
 jest.mock('../../../src/clients/update.client.js', () => ({
@@ -33,16 +34,21 @@ jest.mock('../../../src/clients/update.client.js', () => ({
 }));
 
 jest.mock('../../../src/extensions/stripe/clients/client.js', () => ({
-  __esModule: true,
-  default: jest.fn(),
+  createTaxTransactions: jest.fn(),
+  getTransactionFromTaxCalculation: jest.fn(),
+  updatePaymentIntentMetadata: jest.fn(),
 }));
 
 import { logger } from '../../../src/utils/logger.util.js';
 import { decodeToJson } from '../../../src/utils/decoder.util.js';
 import { doValidation } from '../../../src/validators/order-change.validators.js';
-import { getCartByOrderId } from '../../../src/clients/query.client.js';
+import { getOrderWithPaymentInfo } from '../../../src/clients/query.client.js';
 import { updateOrderTaxTxn } from '../../../src/clients/update.client.js';
-import createTaxTransaction from '../../../src/extensions/stripe/clients/client.js';
+import { 
+  createTaxTransactions, 
+  getTransactionFromTaxCalculation, 
+  updatePaymentIntentMetadata 
+} from '../../../src/extensions/stripe/clients/client.js';
 
 describe('sync.controller.spec', () => {
   let mockRequest;
@@ -145,13 +151,25 @@ describe('sync.controller.spec', () => {
     });
   });
 
-  describe('syncHandler - Cart retrieval', () => {
-    it('should return 204 when cart is not found', async () => {
+  describe('syncHandler - Order retrieval', () => {
+    it('should return 204 when order has no calculation references', async () => {
       const encodedMessage = 'encoded-base64-string';
       const decodedMessage = {
         notificationType: 'Message',
         type: 'OrderCreated',
         resource: { typeId: 'order', id: 'order-123' },
+      };
+
+      const mockOrder = {
+        id: 'order-123',
+        custom: {
+          fields: {
+            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: [],
+          },
+        },
+        paymentInfo: {
+          payments: [{ obj: { interfaceId: 'pi_123' } }],
+        },
       };
 
       mockRequest.body = {
@@ -162,42 +180,18 @@ describe('sync.controller.spec', () => {
 
       decodeToJson.mockReturnValue(decodedMessage);
       doValidation.mockImplementation(() => {});
-      getCartByOrderId.mockResolvedValue(null);
+      getOrderWithPaymentInfo.mockResolvedValue(mockOrder);
 
       await syncHandler(mockRequest, mockResponse);
 
-      expect(getCartByOrderId).toHaveBeenCalledWith('order-123');
+      expect(getOrderWithPaymentInfo).toHaveBeenCalledWith('order-123');
       expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
       expect(responseSendSpy).toHaveBeenCalled();
-      expect(createTaxTransaction).not.toHaveBeenCalled();
+      expect(createTaxTransactions).not.toHaveBeenCalled();
+      expect(getTransactionFromTaxCalculation).not.toHaveBeenCalled();
     });
 
-    it('should return 204 when cart is undefined', async () => {
-      const encodedMessage = 'encoded-base64-string';
-      const decodedMessage = {
-        notificationType: 'Message',
-        type: 'OrderCreated',
-        resource: { typeId: 'order', id: 'order-123' },
-      };
-
-      mockRequest.body = {
-        message: {
-          data: encodedMessage,
-        },
-      };
-
-      decodeToJson.mockReturnValue(decodedMessage);
-      doValidation.mockImplementation(() => {});
-      getCartByOrderId.mockResolvedValue(undefined);
-
-      await syncHandler(mockRequest, mockResponse);
-
-      expect(getCartByOrderId).toHaveBeenCalledWith('order-123');
-      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
-      expect(createTaxTransaction).not.toHaveBeenCalled();
-    });
-
-    it('should handle errors when retrieving cart', async () => {
+    it('should handle errors when retrieving order', async () => {
       const encodedMessage = 'encoded-base64-string';
       const decodedMessage = {
         notificationType: 'Message',
@@ -214,42 +208,141 @@ describe('sync.controller.spec', () => {
       decodeToJson.mockReturnValue(decodedMessage);
       doValidation.mockImplementation(() => {});
 
-      const cartError = new CustomError(
+      const orderError = new CustomError(
         HTTP_STATUS_SUCCESS_ACCEPTED,
         'Order not found'
       );
-      getCartByOrderId.mockRejectedValue(cartError);
+      getOrderWithPaymentInfo.mockRejectedValue(orderError);
 
       await syncHandler(mockRequest, mockResponse);
 
-      expect(getCartByOrderId).toHaveBeenCalledWith('order-123');
+      expect(getOrderWithPaymentInfo).toHaveBeenCalledWith('order-123');
       expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_ACCEPTED);
       expect(logger.error).toHaveBeenCalled();
     });
   });
 
-  describe('syncHandler - Tax transaction creation', () => {
-    it('should successfully sync order to tax provider and return 204', async () => {
+  describe('syncHandler - Single calculation reference', () => {
+    it('should call getTransactionFromTaxCalculation for single calculation reference', async () => {
       const encodedMessage = 'encoded-base64-string';
       const orderId = 'order-123';
+      const calcRef = 'calc_123';
+      const paymentIntentId = 'pi_123';
       const decodedMessage = {
         notificationType: 'Message',
         type: 'OrderCreated',
         resource: { typeId: 'order', id: orderId },
       };
 
-      const mockCart = {
-        id: 'cart-123',
+      const mockOrder = {
+        id: orderId,
         custom: {
           fields: {
-            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: ['calc_123'],
+            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: [calcRef],
           },
+        },
+        paymentInfo: {
+          payments: [{ obj: { interfaceId: paymentIntentId } }],
+        },
+      };
+
+      const mockTransaction = { id: 'tax_123' };
+
+      mockRequest.body = {
+        message: {
+          data: encodedMessage,
+        },
+      };
+
+      decodeToJson.mockReturnValue(decodedMessage);
+      doValidation.mockImplementation(() => {});
+      getOrderWithPaymentInfo.mockResolvedValue(mockOrder);
+      getTransactionFromTaxCalculation.mockResolvedValue(mockTransaction);
+      updateOrderTaxTxn.mockResolvedValue({ body: {} });
+      updatePaymentIntentMetadata.mockResolvedValue();
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(getOrderWithPaymentInfo).toHaveBeenCalledWith(orderId);
+      expect(getTransactionFromTaxCalculation).toHaveBeenCalledWith(calcRef, orderId, paymentIntentId);
+      expect(updateOrderTaxTxn).toHaveBeenCalledWith([mockTransaction], orderId);
+      expect(updatePaymentIntentMetadata).toHaveBeenCalledWith(paymentIntentId, ['tax_123']);
+      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
+    });
+
+    it('should not update order when transaction has no id', async () => {
+      const encodedMessage = 'encoded-base64-string';
+      const orderId = 'order-123';
+      const calcRef = 'calc_123';
+      const paymentIntentId = 'pi_123';
+      const decodedMessage = {
+        notificationType: 'Message',
+        type: 'OrderCreated',
+        resource: { typeId: 'order', id: orderId },
+      };
+
+      const mockOrder = {
+        id: orderId,
+        custom: {
+          fields: {
+            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: [calcRef],
+          },
+        },
+        paymentInfo: {
+          payments: [{ obj: { interfaceId: paymentIntentId } }],
+        },
+      };
+
+      // Transaction without id
+      const mockTransaction = {};
+
+      mockRequest.body = {
+        message: {
+          data: encodedMessage,
+        },
+      };
+
+      decodeToJson.mockReturnValue(decodedMessage);
+      doValidation.mockImplementation(() => {});
+      getOrderWithPaymentInfo.mockResolvedValue(mockOrder);
+      getTransactionFromTaxCalculation.mockResolvedValue(mockTransaction);
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(getTransactionFromTaxCalculation).toHaveBeenCalledWith(calcRef, orderId, paymentIntentId);
+      expect(updateOrderTaxTxn).not.toHaveBeenCalled();
+      expect(updatePaymentIntentMetadata).not.toHaveBeenCalled();
+      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
+    });
+  });
+
+  describe('syncHandler - Multiple calculation references', () => {
+    it('should call createTaxTransactions for multiple calculation references', async () => {
+      const encodedMessage = 'encoded-base64-string';
+      const orderId = 'order-123';
+      const calcRefs = ['calc_123', 'calc_456'];
+      const paymentIntentId = 'pi_123';
+      const decodedMessage = {
+        notificationType: 'Message',
+        type: 'OrderCreated',
+        resource: { typeId: 'order', id: orderId },
+      };
+
+      const mockOrder = {
+        id: orderId,
+        custom: {
+          fields: {
+            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: calcRefs,
+          },
+        },
+        paymentInfo: {
+          payments: [{ obj: { interfaceId: paymentIntentId } }],
         },
       };
 
       const mockTaxTransactions = [
-        { id: 'txn_123' },
-        { id: 'txn_456' },
+        { id: 'tax_123' },
+        { id: 'tax_456' },
       ];
 
       mockRequest.body = {
@@ -260,37 +353,40 @@ describe('sync.controller.spec', () => {
 
       decodeToJson.mockReturnValue(decodedMessage);
       doValidation.mockImplementation(() => {});
-      getCartByOrderId.mockResolvedValue(mockCart);
-      createTaxTransaction.mockResolvedValue(mockTaxTransactions);
+      getOrderWithPaymentInfo.mockResolvedValue(mockOrder);
+      createTaxTransactions.mockResolvedValue(mockTaxTransactions);
       updateOrderTaxTxn.mockResolvedValue({ body: {} });
+      updatePaymentIntentMetadata.mockResolvedValue();
 
       await syncHandler(mockRequest, mockResponse);
 
-      expect(getCartByOrderId).toHaveBeenCalledWith(orderId);
-      expect(createTaxTransaction).toHaveBeenCalledWith(orderId, mockCart);
+      expect(getOrderWithPaymentInfo).toHaveBeenCalledWith(orderId);
+      expect(createTaxTransactions).toHaveBeenCalledWith(orderId, calcRefs, paymentIntentId);
       expect(updateOrderTaxTxn).toHaveBeenCalledWith(mockTaxTransactions, orderId);
-      expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining(`Tax transactions from Stripe of order ${orderId}`)
-      );
+      expect(updatePaymentIntentMetadata).toHaveBeenCalledWith(paymentIntentId, ['tax_123', 'tax_456']);
       expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
-      expect(responseSendSpy).toHaveBeenCalled();
     });
 
-    it('should handle empty tax transactions array', async () => {
+    it('should handle errors from Stripe createTaxTransactions', async () => {
       const encodedMessage = 'encoded-base64-string';
       const orderId = 'order-123';
+      const calcRefs = ['calc_123', 'calc_456'];
+      const paymentIntentId = 'pi_123';
       const decodedMessage = {
         notificationType: 'Message',
         type: 'OrderCreated',
         resource: { typeId: 'order', id: orderId },
       };
 
-      const mockCart = {
-        id: 'cart-123',
+      const mockOrder = {
+        id: orderId,
         custom: {
           fields: {
-            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: ['calc_123'],
+            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: calcRefs,
           },
+        },
+        paymentInfo: {
+          payments: [{ obj: { interfaceId: paymentIntentId } }],
         },
       };
 
@@ -302,114 +398,45 @@ describe('sync.controller.spec', () => {
 
       decodeToJson.mockReturnValue(decodedMessage);
       doValidation.mockImplementation(() => {});
-      getCartByOrderId.mockResolvedValue(mockCart);
-      createTaxTransaction.mockResolvedValue([]);
-
-      await syncHandler(mockRequest, mockResponse);
-
-      expect(createTaxTransaction).toHaveBeenCalledWith(orderId, mockCart);
-      expect(updateOrderTaxTxn).not.toHaveBeenCalled();
-      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
-    });
-
-    it('should handle errors from Stripe tax transaction creation', async () => {
-      const encodedMessage = 'encoded-base64-string';
-      const orderId = 'order-123';
-      const decodedMessage = {
-        notificationType: 'Message',
-        type: 'OrderCreated',
-        resource: { typeId: 'order', id: orderId },
-      };
-
-      const mockCart = {
-        id: 'cart-123',
-        custom: {
-          fields: {
-            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: ['calc_123'],
-          },
-        },
-      };
-
-      mockRequest.body = {
-        message: {
-          data: encodedMessage,
-        },
-      };
-
-      decodeToJson.mockReturnValue(decodedMessage);
-      doValidation.mockImplementation(() => {});
-      getCartByOrderId.mockResolvedValue(mockCart);
+      getOrderWithPaymentInfo.mockResolvedValue(mockOrder);
 
       const stripeError = new Error('Stripe API error');
-      createTaxTransaction.mockRejectedValue(stripeError);
+      createTaxTransactions.mockRejectedValue(stripeError);
 
       await syncHandler(mockRequest, mockResponse);
 
-      expect(createTaxTransaction).toHaveBeenCalledWith(orderId, mockCart);
+      expect(createTaxTransactions).toHaveBeenCalledWith(orderId, calcRefs, paymentIntentId);
       expect(updateOrderTaxTxn).not.toHaveBeenCalled();
-      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_ACCEPTED);
+      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SERVER_ERROR);
       expect(logger.error).toHaveBeenCalled();
     });
+  });
 
-    it('should handle CustomError from Stripe tax transaction creation', async () => {
-      const encodedMessage = 'encoded-base64-string';
-      const orderId = 'order-123';
-      const decodedMessage = {
-        notificationType: 'Message',
-        type: 'OrderCreated',
-        resource: { typeId: 'order', id: orderId },
-      };
-
-      const mockCart = {
-        id: 'cart-123',
-        custom: {
-          fields: {
-            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: ['calc_123'],
-          },
-        },
-      };
-
-      mockRequest.body = {
-        message: {
-          data: encodedMessage,
-        },
-      };
-
-      decodeToJson.mockReturnValue(decodedMessage);
-      doValidation.mockImplementation(() => {});
-      getCartByOrderId.mockResolvedValue(mockCart);
-
-      const stripeError = new CustomError(
-        HTTP_STATUS_SUCCESS_ACCEPTED,
-        'Error from extension : Missing calculation references.'
-      );
-      createTaxTransaction.mockRejectedValue(stripeError);
-
-      await syncHandler(mockRequest, mockResponse);
-
-      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_ACCEPTED);
-      expect(logger.error).toHaveBeenCalled();
-    });
-
+  describe('syncHandler - Error handling', () => {
     it('should handle errors when updating order with tax transactions', async () => {
       const encodedMessage = 'encoded-base64-string';
       const orderId = 'order-123';
+      const calcRefs = ['calc_123', 'calc_456'];
+      const paymentIntentId = 'pi_123';
       const decodedMessage = {
         notificationType: 'Message',
         type: 'OrderCreated',
         resource: { typeId: 'order', id: orderId },
       };
 
-      const mockCart = {
-        id: 'cart-123',
+      const mockOrder = {
+        id: orderId,
         custom: {
           fields: {
-            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: ['calc_123'],
+            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: calcRefs,
           },
+        },
+        paymentInfo: {
+          payments: [{ obj: { interfaceId: paymentIntentId } }],
         },
       };
 
-      const mockTaxTransactions = [{ id: 'txn_123' }];
+      const mockTaxTransactions = [{ id: 'tax_123' }];
 
       mockRequest.body = {
         message: {
@@ -419,8 +446,8 @@ describe('sync.controller.spec', () => {
 
       decodeToJson.mockReturnValue(decodedMessage);
       doValidation.mockImplementation(() => {});
-      getCartByOrderId.mockResolvedValue(mockCart);
-      createTaxTransaction.mockResolvedValue(mockTaxTransactions);
+      getOrderWithPaymentInfo.mockResolvedValue(mockOrder);
+      createTaxTransactions.mockResolvedValue(mockTaxTransactions);
 
       const updateError = new CustomError(
         HTTP_STATUS_SUCCESS_ACCEPTED,
@@ -430,7 +457,7 @@ describe('sync.controller.spec', () => {
 
       await syncHandler(mockRequest, mockResponse);
 
-      expect(createTaxTransaction).toHaveBeenCalledWith(orderId, mockCart);
+      expect(createTaxTransactions).toHaveBeenCalledWith(orderId, calcRefs, paymentIntentId);
       expect(updateOrderTaxTxn).toHaveBeenCalledWith(mockTaxTransactions, orderId);
       expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_ACCEPTED);
       expect(logger.error).toHaveBeenCalled();
@@ -454,12 +481,54 @@ describe('sync.controller.spec', () => {
       doValidation.mockImplementation(() => {});
 
       const genericError = new Error('Unexpected error');
-      getCartByOrderId.mockRejectedValue(genericError);
+      getOrderWithPaymentInfo.mockRejectedValue(genericError);
 
       await syncHandler(mockRequest, mockResponse);
 
       expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SERVER_ERROR);
       expect(logger.error).toHaveBeenCalled();
+    });
+
+    it('should not call updatePaymentIntentMetadata when paymentIntentId is missing', async () => {
+      const encodedMessage = 'encoded-base64-string';
+      const orderId = 'order-123';
+      const calcRef = 'calc_123';
+      const decodedMessage = {
+        notificationType: 'Message',
+        type: 'OrderCreated',
+        resource: { typeId: 'order', id: orderId },
+      };
+
+      const mockOrder = {
+        id: orderId,
+        custom: {
+          fields: {
+            [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: [calcRef],
+          },
+        },
+        paymentInfo: {
+          payments: [{ obj: {} }], // No interfaceId
+        },
+      };
+
+      const mockTransaction = { id: 'tax_123' };
+
+      mockRequest.body = {
+        message: {
+          data: encodedMessage,
+        },
+      };
+
+      decodeToJson.mockReturnValue(decodedMessage);
+      doValidation.mockImplementation(() => {});
+      getOrderWithPaymentInfo.mockResolvedValue(mockOrder);
+      getTransactionFromTaxCalculation.mockResolvedValue(mockTransaction);
+      updateOrderTaxTxn.mockResolvedValue({ body: {} });
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(updatePaymentIntentMetadata).not.toHaveBeenCalled();
+      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
     });
   });
 });

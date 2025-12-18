@@ -11,13 +11,11 @@ import { ORDER_TAX_FIELD_NAMES } from '../connectors/customTypes.js';
  * @returns {Promise<object>} The order object.
  */
 export async function updateOrderTaxTxn(taxTransactions, orderId) {
-  let actions = [];
-
-  actions.push({
+  const actions = [{
     action: 'setCustomField',
     name: ORDER_TAX_FIELD_NAMES.TRANSACTION_REFERENCES,
-    value: taxTransactions.map(txn => txn.id)
-  });
+    value: taxTransactions.map(txn => txn?.id)
+  }];
 
   const order = await getOrder(orderId);
   return await createApiRoot()

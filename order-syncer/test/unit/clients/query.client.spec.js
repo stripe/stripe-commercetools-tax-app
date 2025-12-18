@@ -1,5 +1,5 @@
 import { expect, describe, it, jest, beforeEach } from '@jest/globals';
-import { getCartByOrderId, getOrder } from '../../../src/clients/query.client.js';
+import { getOrderWithPaymentInfo, getOrder } from '../../../src/clients/query.client.js';
 import CustomError from '../../../src/errors/custom.error.js';
 import { HTTP_STATUS_SUCCESS_ACCEPTED } from '../../../src/constants/http.status.constants.js';
 
@@ -21,21 +21,33 @@ describe('query.client.spec', () => {
     createApiRoot.mockReturnValue(mockApiRoot);
   });
 
-  describe('getCartByOrderId', () => {
-    it('should return cart object when order is found', async () => {
+  describe('getOrderWithPaymentInfo', () => {
+    it('should return order object with payment info when order is found', async () => {
       const orderId = 'order-123';
-      const mockCart = {
-        id: 'cart-123',
-        lineItems: [],
+      const mockOrder = {
+        id: orderId,
+        version: 1,
+        orderState: 'Confirmed',
         totalPrice: { currencyCode: 'USD', centAmount: 1000 },
+        paymentInfo: {
+          payments: [
+            {
+              obj: {
+                id: 'payment-123',
+                interfaceId: 'pi_123',
+              },
+            },
+          ],
+        },
+        custom: {
+          fields: {
+            connectorStripeTax_calculationReferences: ['calc_123'],
+          },
+        },
       };
 
       const mockOrderResponse = {
-        body: {
-          cart: {
-            obj: mockCart,
-          },
-        },
+        body: mockOrder,
       };
 
       const mockOrderRequest = {
@@ -47,23 +59,29 @@ describe('query.client.spec', () => {
       mockApiRoot.orders.mockReturnValue(mockOrderRequest);
       mockOrderRequest.withId.mockReturnValue(mockOrderRequest);
 
-      const result = await getCartByOrderId(orderId);
+      const result = await getOrderWithPaymentInfo(orderId);
 
       expect(createApiRoot).toHaveBeenCalled();
       expect(mockApiRoot.orders).toHaveBeenCalled();
       expect(mockOrderRequest.withId).toHaveBeenCalledWith({ ID: orderId });
       expect(mockOrderRequest.get).toHaveBeenCalledWith({
-        queryArgs: { withTotal: false, expand: ['cart'] },
+        queryArgs: { withTotal: false, expand: ['paymentInfo.payments[*]'] },
       });
-      expect(result).toEqual(mockCart);
+      expect(result).toEqual(mockOrder);
     });
 
-    it('should return undefined when cart is not found in order', async () => {
+    it('should return order without payment info when payments are not present', async () => {
       const orderId = 'order-123';
+      const mockOrder = {
+        id: orderId,
+        version: 1,
+        orderState: 'Confirmed',
+        totalPrice: { currencyCode: 'USD', centAmount: 1000 },
+        paymentInfo: undefined,
+      };
+
       const mockOrderResponse = {
-        body: {
-          cart: undefined,
-        },
+        body: mockOrder,
       };
 
       const mockOrderRequest = {
@@ -75,9 +93,10 @@ describe('query.client.spec', () => {
       mockApiRoot.orders.mockReturnValue(mockOrderRequest);
       mockOrderRequest.withId.mockReturnValue(mockOrderRequest);
 
-      const result = await getCartByOrderId(orderId);
+      const result = await getOrderWithPaymentInfo(orderId);
 
-      expect(result).toBeUndefined();
+      expect(result).toEqual(mockOrder);
+      expect(result.paymentInfo).toBeUndefined();
     });
 
     it('should throw CustomError when API call fails', async () => {
@@ -93,10 +112,10 @@ describe('query.client.spec', () => {
       mockApiRoot.orders.mockReturnValue(mockOrderRequest);
       mockOrderRequest.withId.mockReturnValue(mockOrderRequest);
 
-      await expect(getCartByOrderId(orderId)).rejects.toThrow();
+      await expect(getOrderWithPaymentInfo(orderId)).rejects.toThrow();
 
       try {
-        await getCartByOrderId(orderId);
+        await getOrderWithPaymentInfo(orderId);
       } catch (error) {
         expect(error).toBeInstanceOf(CustomError);
         expect(error.statusCode).toBe(HTTP_STATUS_SUCCESS_ACCEPTED);
@@ -162,4 +181,3 @@ describe('query.client.spec', () => {
     });
   });
 });
-

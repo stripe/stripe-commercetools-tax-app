@@ -1,5 +1,5 @@
-import { HTTP_STATUS_SERVER_ERROR } from "../constants/http.status.constants";
-import CustomError from "../errors/custom.error";
+import { HTTP_STATUS_SERVER_ERROR } from "../constants/http.status.constants.js";
+import CustomError from "../errors/custom.error.js";
 
 const decodeToString = (encodedMessageBody) => {
   const buff = Buffer.from(encodedMessageBody, 'base64');
