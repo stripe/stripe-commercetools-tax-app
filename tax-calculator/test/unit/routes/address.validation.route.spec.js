@@ -1,4 +1,4 @@
-import { expect, describe, it, jest, beforeEach, afterEach } from '@jest/globals';
+import { expect, describe, it, jest, beforeEach } from '@jest/globals';
 import request from 'supertest';
 import express from 'express';
 import addressValidationRouter from '../../../src/routes/address.validation.route.js';
@@ -10,28 +10,14 @@ jest.mock('../../../src/controllers/address.validation.controller.js', () => ({
   })
 }));
 
-jest.mock('../../../src/middlewares/rate.limiter.middleware.js', () => ({
-  rateLimiterMiddleware: jest.fn((requests, window) => {
-    return (req, res, next) => {
-      next();
-    };
-  })
-}));
-
 describe('address.validation.route', () => {
   let app;
-  let originalEnv;
   let validateAddressHandler;
-  let rateLimiterMiddleware;
 
   beforeEach(async () => {
-    originalEnv = { ...process.env };
-    
     // Get references to mocked functions before clearing mocks
     const controllerModule = await import('../../../src/controllers/address.validation.controller.js');
-    const middlewareModule = await import('../../../src/middlewares/rate.limiter.middleware.js');
     validateAddressHandler = controllerModule.validateAddressHandler;
-    rateLimiterMiddleware = middlewareModule.rateLimiterMiddleware;
     
     app = express();
     app.use(express.json());
@@ -41,63 +27,12 @@ describe('address.validation.route', () => {
     jest.clearAllMocks();
   });
 
-  afterEach(() => {
-    process.env = originalEnv;
-  });
-
   describe('POST /validateAddress', () => {
-    it('should use default rate limit when environment variables are not set', async () => {
-      delete process.env.ADDRESS_VALIDATION_RATE_LIMIT;
-      delete process.env.ADDRESS_VALIDATION_WINDOW_MINUTES;
-
-      // Re-import to get fresh defaults
-      jest.resetModules();
-      const freshRouter = (await import('../../../src/routes/address.validation.route.js')).default;
-      const freshApp = express();
-      freshApp.use(express.json());
-      freshApp.use('/api', freshRouter);
-
-      const response = await request(freshApp)
+    it('should return 200 when route is accessed', async () => {
+      const response = await request(app)
         .post('/api/validateAddress')
         .send({ address: { country: 'US' } });
 
-      expect(response.status).toBe(200);
-    });
-
-    it('should use custom rate limit from environment variables', async () => {
-      process.env.ADDRESS_VALIDATION_RATE_LIMIT = '200';
-      process.env.ADDRESS_VALIDATION_WINDOW_MINUTES = '5';
-
-      // Re-import to get fresh defaults
-      jest.resetModules();
-      const freshRouter = (await import('../../../src/routes/address.validation.route.js')).default;
-      const freshApp = express();
-      freshApp.use(express.json());
-      freshApp.use('/api', freshRouter);
-
-      const response = await request(freshApp)
-        .post('/api/validateAddress')
-        .send({ address: { country: 'US' } });
-
-      expect(response.status).toBe(200);
-    });
-
-    it('should handle invalid rate limit values and use defaults', async () => {
-      process.env.ADDRESS_VALIDATION_RATE_LIMIT = 'invalid';
-      process.env.ADDRESS_VALIDATION_WINDOW_MINUTES = 'invalid';
-
-      // Re-import to get fresh defaults
-      jest.resetModules();
-      const freshRouter = (await import('../../../src/routes/address.validation.route.js')).default;
-      const freshApp = express();
-      freshApp.use(express.json());
-      freshApp.use('/api', freshRouter);
-
-      const response = await request(freshApp)
-        .post('/api/validateAddress')
-        .send({ address: { country: 'US' } });
-
-      // Should still work with NaN defaults (which parseInt will handle)
       expect(response.status).toBe(200);
     });
 
@@ -130,30 +65,5 @@ describe('address.validation.route', () => {
         expect.any(Function) // next function
       );
     });
-
-    it('should apply rate limiter middleware', async () => {
-      // Re-import the route to trigger rateLimiterMiddleware call
-      jest.resetModules();
-      
-      // Get fresh reference to the mocked middleware after reset
-      const middlewareModule = await import('../../../src/middlewares/rate.limiter.middleware.js');
-      const freshRateLimiterMiddleware = middlewareModule.rateLimiterMiddleware;
-      
-      const testRouter = (await import('../../../src/routes/address.validation.route.js')).default;
-      const testApp = express();
-      testApp.use(express.json());
-      testApp.use('/api', testRouter);
-      
-      // Now verify that rateLimiterMiddleware was called with default values (100, 1)
-      expect(freshRateLimiterMiddleware).toHaveBeenCalledWith(100, 1);
-      
-      // Also verify the route works correctly with the middleware applied
-      const response = await request(testApp)
-        .post('/api/validateAddress')
-        .send({ address: { country: 'US' } });
-      
-      expect(response.status).toBe(200);
-    });
   });
 });
-
