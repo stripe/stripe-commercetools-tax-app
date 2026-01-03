@@ -49,12 +49,6 @@ deployAs:
           description: Default line 2 for ship from address
         - key: SHIP_FROM_CHANNEL_PRIORITY
           description: Comma-separated channel IDs for priority-based selection (e.g. 'channel-1,channel-2,channel-3')
-        - key: ADDRESS_VALIDATION_RATE_LIMIT
-          description: Rate limit for address validation in requests per minute
-          default: '100'
-        - key: ADDRESS_VALIDATION_WINDOW_MINUTES
-          description: Time window in minutes for address validation rate limit
-          default: '1'
         - key: ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY
           description: Default currency for Stripe verification
           default: 'usd'
