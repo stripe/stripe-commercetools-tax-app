@@ -48,6 +48,10 @@ export async function validateAddressHandler(req, res) {
             hasStripeVerification: !!validationResult.validation.stripe
         });
 
+        if (!validationResult.success) {
+            return res.status(HTTP_STATUS_BAD_REQUEST).json(validationResult);
+        }
+
         return res.status(HTTP_STATUS_SUCCESS_ACCEPTED).json(validationResult);
 
     } catch (error) {
