@@ -28,7 +28,7 @@ export async function createCTPExtension(
         {
           resourceTypeId: 'cart',
           actions: ['Update', 'Create'],
-          condition: 'taxMode="ExternalAmount" AND lineItems is defined AND lineItems is not empty AND (shippingInfo is defined OR lineItems(shippingDetails is defined)) AND (taxMode has changed OR lineItems has changed OR shippingInfo has changed OR shippingAddress has changed OR shipping has changed OR itemShippingAddresses has changed)',
+          condition: 'taxMode="ExternalAmount" AND lineItems is defined AND lineItems is not empty AND (shippingInfo is defined OR lineItems(shippingDetails is defined)) AND paymentInfo is not defined AND (taxMode has changed OR lineItems has changed OR shippingInfo has changed OR shippingAddress has changed OR shipping has changed OR itemShippingAddresses has changed)',
         },
       ],
       timeoutInMs: 2000,

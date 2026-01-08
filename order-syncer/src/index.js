@@ -13,7 +13,7 @@ const PORT = 8080;
 const app = express();
 
 // Define configurations
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // Define routes
