@@ -34,7 +34,7 @@
     "@commercetools-backend/loggers": "^22.29.0",
     "@commercetools/platform-sdk": "^7.9.0",
     "@commercetools/sdk-client-v2": "^2.2.0",
-    "body-parser": "^1.20.1",
+    "body-parser": "^1.20.4",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
     "lodash": "^4.17.21",
