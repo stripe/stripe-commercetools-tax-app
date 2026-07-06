@@ -39,7 +39,6 @@ order-syncer/coverage/
 
 # AI Generated Files
 .claude
-CLAUDE.md
 commercetools-key.json
 .superdesign
 .cursor
