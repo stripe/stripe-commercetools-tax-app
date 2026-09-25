@@ -28,7 +28,7 @@ class UpdateActionService {
       const combinedCalculation = this.combineCalculations(calculations);
       
       // STEP 2: Create cart custom type update action
-      const cartCustomTypeAction = this.createCartCustomTypeUpdateAction(combinedCalculation);
+      const cartCustomTypeAction = this.createCartCustomTypeUpdateAction(combinedCalculation, requests);
       updateActions.push(cartCustomTypeAction);
       
       // STEP 3b: Create line item total price update actions (to update cart.totalPrice without taxes)
@@ -193,9 +193,10 @@ class UpdateActionService {
   /**
    * Create cart custom type update action
    * @param {Object} calculation - Stripe tax calculation response object
+   * @param {Array} [requests] - The Stripe requests this calculation came from
    * @returns {Object} Commercetools setCustomType update action
    */
-  createCartCustomTypeUpdateAction(calculation) {
+  createCartCustomTypeUpdateAction(calculation, requests = []) {
     return {
       action: "setCustomType",
       type: {
@@ -209,9 +210,53 @@ class UpdateActionService {
         [CART_TAX_FIELD_NAMES.TAX_AMOUNT_INCLUSIVE]: calculation.tax_amount_inclusive,
         [CART_TAX_FIELD_NAMES.CURRENCIES]: calculation.currencies,
         [CART_TAX_FIELD_NAMES.EXPIRES_AT]: calculation.expires_at,
-        [CART_TAX_FIELD_NAMES.CALCULATION_TIMESTAMP]: new Date().toISOString()
+        [CART_TAX_FIELD_NAMES.CALCULATION_TIMESTAMP]: new Date().toISOString(),
+        [CART_TAX_FIELD_NAMES.DESTINATION_COUNTRY]: this.summariseDestinations(requests)
       }
     };
+  }
+
+  /**
+   * Summarise the destinations a calculation was made for, read back from the requests actually
+   * sent to Stripe rather than from the cart — so the record cannot disagree with what was asked.
+   *
+   * Stored on the cart so a later re-apply can tell whether the stored calculation still belongs
+   * to where the order is going. A cart carrying a calculation but no destination was calculated
+   * before SB3-218 and is recalculated rather than trusted.
+   *
+   * @param {Array} requests - Stripe requests
+   * @returns {string} Sorted, comma-separated destination countries; empty if none are known
+   * @private
+   */
+  summariseDestinations(requests = []) {
+    return [...new Set(
+      (requests || [])
+        .map(request => request?.customer_details?.address?.country)
+        .filter(Boolean)
+    )].sort().join(',');
+  }
+
+  /**
+   * The country to label an action with when Stripe returned no tax breakdown to name one.
+   *
+   * Read from the calculation itself: the breakdowns name the jurisdiction that actually applied,
+   * and `customer_details.address` is the destination Stripe taxed against, echoed back. A label
+   * taken from either therefore cannot disagree with the calculation it accompanies.
+   *
+   * `cart.country` is deliberately absent from this chain. It selects prices and the shopper
+   * controls it, so it is never a statement about where the order goes (SB3-218, ADR-007). It
+   * used to sit here as a fallback, which could stamp a zero-tax action with a jurisdiction the
+   * order was never bound for — harmless for the amount, which is zero either way, but a
+   * misleading record and the same reasoning error the destination fix removed everywhere else.
+   *
+   * @param {Object} calculation - Stripe tax calculation response
+   * @returns {string|undefined} Destination country code, or undefined if the calculation names none
+   * @private
+   */
+  destinationCountryOf(calculation) {
+    return calculation?.shipping_cost?.tax_breakdown?.[0]?.tax_rate_details?.country ||
+           calculation?.tax_breakdown?.[0]?.tax_rate_details?.country ||
+           calculation?.customer_details?.address?.country;
   }
 
   /**
@@ -291,19 +336,21 @@ class UpdateActionService {
       const shippingKey = calculationToShippingKey.get(calculation.id) || null;
       const calculationActions = this.createLineItemActionsFromCalculation(
         calculation,
-        shippingKey, // null for Single mode, shippingKey for Multiple mode
-        cart // Pass cart for fallback country
+        shippingKey // null for Single mode, shippingKey for Multiple mode
       );
       actions.push(...calculationActions);
     }
-    
+
     // Merge duplicate actions (same lineItemId + shippingKey from multiple calculations)
     const actionsByKey = this.mergeDuplicateTaxActions(actions);
-    
+
     // CRITICAL: Ensure all line items with setLineItemTotalPrice also have setLineItemTaxAmount
     // This is required because setLineItemTotalPrice changes priceMode to ExternalTotal,
     // and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set
-    this.ensureMissingTaxActions(actionsByKey, lineItemTotalPriceActions, cart);
+    const destinationCountry = calculations
+      .map(calculation => this.destinationCountryOf(calculation))
+      .find(Boolean);
+    this.ensureMissingTaxActions(actionsByKey, lineItemTotalPriceActions, cart, destinationCountry);
     
     // Remove temporary fields and return final actions
     const finalActions = this.removeTemporaryTaxFields(actionsByKey);
@@ -390,11 +437,13 @@ class UpdateActionService {
    * and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set
    * @param {Map} actionsByKey - Map of tax actions keyed by lineItemId-shippingKey
    * @param {Array} lineItemTotalPriceActions - Array of setLineItemTotalPrice actions
-   * @param {Object} cart - Commercetools cart (optional, for fallback values)
+   * @param {Object} cart - Commercetools cart (optional, for fallback currency)
+   * @param {string} [destinationCountry] - Destination the calculations were made for, used to
+   *   label the zero-tax actions. Resolved by the caller through destinationCountryOf.
    * @private
    */
-  ensureMissingTaxActions(actionsByKey, lineItemTotalPriceActions, cart) {
-    const defaultCountry = cart?.country || cart?.shippingAddress?.country || 'US';
+  ensureMissingTaxActions(actionsByKey, lineItemTotalPriceActions, cart, destinationCountry = undefined) {
+    const defaultCountry = destinationCountry || 'US';
     const defaultCurrency = cart?.totalPrice?.currencyCode || 'USD';
     
     for (const totalPriceAction of lineItemTotalPriceActions) {
@@ -627,10 +676,9 @@ class UpdateActionService {
    * and CommerceTools requires all ExternalTotal line items to have externalTaxAmount set.
    * @param {Object} calculation - Stripe tax calculation response
    * @param {string|null} shippingKey - Shipping method key (required for Multiple mode, null for Single)
-   * @param {Object} cart - Commercetools cart (optional, for fallback country)
    * @returns {Array} Array of setLineItemTaxAmount update actions
    */
-  createLineItemActionsFromCalculation(calculation, shippingKey = null, cart = null) {
+  createLineItemActionsFromCalculation(calculation, shippingKey = null) {
     const actions = [];
     const lineItems = calculation.line_items?.data || [];
     
@@ -640,13 +688,9 @@ class UpdateActionService {
     // Therefore, we need to use matching logic to identify the correct breakdown
     const taxBreakdowns = calculation.tax_breakdown || [];
     
-    // Get default country from calculation (from shipping cost or first breakdown)
-    // Fallback to cart country if available
-    const defaultCountry = calculation.shipping_cost?.tax_breakdown?.[0]?.tax_rate_details?.country ||
-                           calculation.tax_breakdown?.[0]?.tax_rate_details?.country ||
-                           cart?.country ||
-                           cart?.shippingAddress?.country ||
-                           'US';
+    // Country to label a line item that came back without a breakdown — read from the
+    // calculation, never from the cart. See destinationCountryOf.
+    const defaultCountry = this.destinationCountryOf(calculation) || 'US';
     
     for (const lineItemData of lineItems) {
       // Find tax breakdown for this line item using matching logic
@@ -909,9 +953,7 @@ class UpdateActionService {
         taxRate: {
           name: 'no_shipping_tax',
           amount: 0,
-          country: calculation?.tax_breakdown?.[0]?.tax_rate_details?.country || 
-                   cart?.country || 
-                   'US'
+          country: this.destinationCountryOf(calculation) || 'US'
         }
       }
     };

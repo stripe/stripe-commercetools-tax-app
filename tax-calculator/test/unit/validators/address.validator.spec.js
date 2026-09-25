@@ -327,6 +327,7 @@ describe('AddressValidator', () => {
         country: 'US',
         shippingMode: 'Single',
         shippingAddress: {
+          country: 'US',
           streetName: '123 Main St',
           city: 'New York',
           state: 'NY',
@@ -344,6 +345,7 @@ describe('AddressValidator', () => {
         shipping: [
           {
             shippingAddress: {
+              country: 'US',
               streetName: '123 Main St',
               city: 'New York',
               state: 'NY',
@@ -356,13 +358,17 @@ describe('AddressValidator', () => {
       expect(errors).toEqual([]);
     });
 
-    it('should handle missing shippingAddress in Single mode', () => {
+    it('reports a missing country when the cart has no delivery address, even if cart.country is set', () => {
+      // Before SB3-218 this asserted the opposite: cart.country was accepted as the address
+      // country, so a cart with no delivery address at all validated as having one. The validator
+      // now judges the delivery address on its own, and a cart without one has no destination to
+      // validate — cart.country selects prices and cannot stand in for it.
       const cartRequest = {
         country: 'US',
         shippingMode: 'Single'
       };
       const errors = validateCartAddress(cartRequest);
-      expect(errors.some(e => e.code === 'MISSING_COUNTRY')).toBe(false); // Country is present
+      expect(errors.some(e => e.code === 'MISSING_COUNTRY')).toBe(true);
     });
 
     it('should handle missing shipping in Multiple mode', () => {
@@ -381,6 +387,7 @@ describe('AddressValidator', () => {
         country: 'US',
         shippingMode: 'Single',
         shippingAddress: {
+          country: 'US',
           streetName: '123 Main St',
           city: 'New York',
           state: 'NY',

@@ -217,9 +217,11 @@ export const validateCartAddress = (cartRequest) => {
         shippingAddress = cartRequest.shipping[0].shippingAddress || {};
     }
 
-    // Create address object for validation
+    // Validate the delivery address as a whole, country included. Taking the country from
+    // cartRequest.country would validate an address that is part delivery destination and part
+    // price-selection country — the hybrid behind SB3-218 — and report it as valid.
     const addressToValidate = {
-        country: cartRequest.country,
+        country: shippingAddress.country,
         postal_code: shippingAddress.postalCode,
         line1: shippingAddress.streetName,
         city: shippingAddress.city,

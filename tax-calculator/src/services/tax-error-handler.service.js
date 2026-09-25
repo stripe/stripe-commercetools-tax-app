@@ -5,6 +5,7 @@ import TaxCodeNotFoundError from '../errors/taxCodeNotFound.error.js';
 import TaxCodeShippingNotFoundError from '../errors/taxCodeShippingNotFound.error.js';
 import MissingTaxRateForCountry from '../errors/missingTaxRateForCountry.error.js';
 import ShipFromNotFoundError from '../errors/shipFromNotFoundError.js';
+import InvalidTaxDestinationError from '../errors/invalidTaxDestination.error.js';
 
 /**
  * Error handler specifically for tax calculation errors
@@ -23,6 +24,11 @@ class TaxErrorHandlerService {
     // Handle ship-from not found errors
     if (error instanceof ShipFromNotFoundError) {
       return this.handleShipFromNotFoundError(error, response);
+    }
+
+    // Handle an unusable tax destination (delivery address without a country)
+    if (error instanceof InvalidTaxDestinationError) {
+      return this.handleInvalidTaxDestinationError(error, response);
     }
 
     // Handle tax code not found errors
@@ -60,9 +66,27 @@ class TaxErrorHandlerService {
   }
 
   /**
+   * Handle InvalidTaxDestinationError — a delivery address that locates the order but names no
+   * country. Refusing is deliberate: completing it from cart.country would tax the sale in a
+   * jurisdiction the goods are not going to (SB3-218).
+   * @param {InvalidTaxDestinationError} error
+   * @param {Object} response
+   * @returns {Object}
+   */
+  static handleInvalidTaxDestinationError(error, response) {
+    logger.error('Unusable tax destination: delivery address has no country', {
+      shippingKey: error.shippingKey,
+      presentFields: error.presentFields
+    });
+    return response.status(HTTP_STATUS_BAD_REQUEST).json({
+      errors: [error.toCommercetoolsError()]
+    });
+  }
+
+  /**
    * Handle TaxCodeNotFoundError
-   * @param {TaxCodeNotFoundError} error 
-   * @param {Object} response 
+   * @param {TaxCodeNotFoundError} error
+   * @param {Object} response
    * @returns {Object}
    */
   static handleTaxCodeNotFoundError(error, response) {

@@ -28,12 +28,32 @@ describe('TaxBehaviorService', () => {
         countryTaxBehaviorMapping: '{"DE":"inclusive"}'
       });
 
-      const result = await taxBehaviorService.determineTaxBehaviorForCart(cartRequest);
+      const result = await taxBehaviorService.determineTaxBehaviorForCart(cartRequest, 'DE');
 
       expect(result).toEqual({
         'line-item-1': TAX_BEHAVIOR_INCLUSIVE,
         'line-item-2': TAX_BEHAVIOR_INCLUSIVE
       });
+    });
+
+    it('ignores cart.country — only the delivery destination selects the behavior (SB3-218)', async () => {
+      // cart.country is shopper-controlled and means price selection. Letting it pick the
+      // behavior let a shopper force `inclusive` on a price published as exclusive, so Stripe
+      // carved the tax out of the amount instead of adding it and the merchant remitted it from
+      // their own margin. With no destination there is no destination rule, and resolution falls
+      // through to the merchant default (unset here) and then to the account's Stripe setting.
+      const cartRequest = {
+        country: 'DE',
+        lineItems: [{ id: 'line-item-1', productId: 'product-1' }]
+      };
+
+      configUtils.readConfiguration.mockReturnValue({
+        countryTaxBehaviorMapping: '{"DE":"inclusive"}'
+      });
+
+      const result = await taxBehaviorService.determineTaxBehaviorForCart(cartRequest);
+
+      expect(result).toEqual({ 'line-item-1': null });
     });
 
     it('should handle empty line items array', async () => {
@@ -60,7 +80,7 @@ describe('TaxBehaviorService', () => {
         countryTaxBehaviorMapping: '{"DE":"inclusive"}'
       });
 
-      const result = taxBehaviorService.determineCartTaxBehavior(cartContext);
+      const result = taxBehaviorService.determineCartTaxBehavior(cartContext, cartContext.country);
 
       expect(result).toBe(TAX_BEHAVIOR_INCLUSIVE);
     });
@@ -74,7 +94,7 @@ describe('TaxBehaviorService', () => {
         taxBehaviorDefault: TAX_BEHAVIOR_EXCLUSIVE
       });
 
-      const result = taxBehaviorService.determineCartTaxBehavior(cartContext);
+      const result = taxBehaviorService.determineCartTaxBehavior(cartContext, cartContext.country);
 
       expect(result).toBe(TAX_BEHAVIOR_EXCLUSIVE);
     });
@@ -84,7 +104,7 @@ describe('TaxBehaviorService', () => {
       
       configUtils.readConfiguration.mockReturnValue({});
 
-      const result = taxBehaviorService.determineCartTaxBehavior(cartContext);
+      const result = taxBehaviorService.determineCartTaxBehavior(cartContext, cartContext.country);
 
       expect(result).toBeNull();
     });
@@ -96,7 +116,7 @@ describe('TaxBehaviorService', () => {
         taxBehaviorDefault: TAX_BEHAVIOR_INCLUSIVE
       });
 
-      const result = taxBehaviorService.determineCartTaxBehavior(cartContext);
+      const result = taxBehaviorService.determineCartTaxBehavior(cartContext, cartContext.country);
 
       expect(result).toBe(TAX_BEHAVIOR_INCLUSIVE);
     });
@@ -126,7 +146,7 @@ describe('TaxBehaviorService', () => {
         countryTaxBehaviorMapping: '{"DE":"inclusive","US":"exclusive"}'
       });
 
-      const result = taxBehaviorService.getCountryBasedBehavior(cartContext);
+      const result = taxBehaviorService.getCountryBasedBehavior(cartContext.country);
 
       expect(result).toBe(TAX_BEHAVIOR_INCLUSIVE);
     });
@@ -138,7 +158,7 @@ describe('TaxBehaviorService', () => {
         countryTaxBehaviorMapping: '{"DE":"inclusive","US":"exclusive"}'
       });
 
-      const result = taxBehaviorService.getCountryBasedBehavior(cartContext);
+      const result = taxBehaviorService.getCountryBasedBehavior(cartContext.country);
 
       expect(result).toBeNull();
     });
@@ -153,7 +173,7 @@ describe('TaxBehaviorService', () => {
         countryTaxBehaviorMapping: 'invalid-json'
       });
 
-      const result = taxBehaviorService.getCountryBasedBehavior(cartContext);
+      const result = taxBehaviorService.getCountryBasedBehavior(cartContext.country);
 
       expect(result).toBeNull();
     });
@@ -197,7 +217,7 @@ describe('TaxBehaviorService', () => {
         countryTaxBehaviorMapping: '{"DE":"inclusive"}'
       });
 
-      const result = taxBehaviorService.getDecisionReason(cartContext, TAX_BEHAVIOR_INCLUSIVE);
+      const result = taxBehaviorService.getDecisionReason(cartContext.country, TAX_BEHAVIOR_INCLUSIVE);
 
       expect(result).toBe('country_mapping');
     });
@@ -209,7 +229,7 @@ describe('TaxBehaviorService', () => {
         taxBehaviorDefault: TAX_BEHAVIOR_EXCLUSIVE
       });
 
-      const result = taxBehaviorService.getDecisionReason(cartContext, TAX_BEHAVIOR_EXCLUSIVE);
+      const result = taxBehaviorService.getDecisionReason(cartContext.country, TAX_BEHAVIOR_EXCLUSIVE);
 
       expect(result).toBe('merchant_default');
     });

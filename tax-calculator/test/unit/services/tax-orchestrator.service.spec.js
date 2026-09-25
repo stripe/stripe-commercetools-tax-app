@@ -48,7 +48,10 @@ jest.mock('../../../src/services/tax-code.service.js', () => ({
 jest.mock('../../../src/services/update-action.service.js', () => ({
   __esModule: true,
   default: {
-    createCartUpdateActionsFromMultipleCalculations: jest.fn()
+    createCartUpdateActionsFromMultipleCalculations: jest.fn(),
+    createLineItemActionsFromCalculation: jest.fn(),
+    createCartTotalTaxAction: jest.fn(),
+    createShippingTaxUpdateAction: jest.fn()
   }
 }));
 
@@ -73,7 +76,8 @@ describe('TaxOrchestratorService', () => {
     mockStripeClient = {
       tax: {
         calculations: {
-          create: jest.fn()
+          create: jest.fn(),
+          retrieve: jest.fn()
         }
       }
     };
@@ -95,6 +99,7 @@ describe('TaxOrchestratorService', () => {
         locale: 'en',
         totalPrice: { currencyCode: 'USD' },
         shippingAddress: {
+          country: 'US',
           state: 'NY',
           city: 'New York',
           postalCode: '10001',
@@ -153,7 +158,9 @@ describe('TaxOrchestratorService', () => {
       const result = await taxOrchestratorService.orchestrateTaxCalculation(cart);
 
       expect(result).toEqual({ actions: mockActions });
-      expect(taxBehaviorService.determineTaxBehaviorForCart).toHaveBeenCalledWith(cart);
+      // The destination country is passed explicitly: the behavior follows where the order is
+      // delivered, not cart.country (SB3-218).
+      expect(taxBehaviorService.determineTaxBehaviorForCart).toHaveBeenCalledWith(cart, 'US');
       expect(shipFromService.resolveAllShipFromAddresses).toHaveBeenCalledWith(cart.lineItems);
       expect(categoryService.getCategoriesForProducts).toHaveBeenCalled();
       expect(mockStripeClient.tax.calculations.create).toHaveBeenCalled();
@@ -188,6 +195,7 @@ describe('TaxOrchestratorService', () => {
           {
             shippingKey: 'shipping-1',
             shippingAddress: {
+              country: 'US',
               state: 'NY',
               city: 'New York',
               postalCode: '10001'
@@ -247,6 +255,147 @@ describe('TaxOrchestratorService', () => {
 
       expect(result).toEqual({ actions: mockActions });
       expect(mockStripeClient.tax.calculations.create).toHaveBeenCalled();
+    });
+  });
+
+  describe('reapplyExistingCalculation', () => {
+    // A cart whose stored calculation still belongs to where it delivers: it carries a delivery
+    // address and the destination that calculation was made for. Re-apply is only reachable in
+    // that state — a calculation recorded against a different destination, or against none at
+    // all (everything stored before SB3-218), is recalculated instead.
+    const makeCart = (overrides = {}) => ({
+      id: 'cart-reapply-1',
+      shippingMode: 'Single',
+      country: 'US',
+      shippingAddress: { country: 'US', city: 'New York', postalCode: '10001' },
+      custom: {
+        fields: {
+          connectorStripeTax_calculationReferences: ['taxcalc_abc123'],
+          connectorStripeTax_destinationCountry: 'US'
+        }
+      },
+      ...overrides
+    });
+
+    it('should retrieve the existing calculation and return line item + cart total actions', async () => {
+      const mockCalculation = {
+        id: 'taxcalc_abc123',
+        amount_total: 3264,
+        currency: 'usd',
+        line_items: { data: [{ reference: 'li-1', amount: 1998, amount_tax: 177 }] },
+        tax_breakdown: []
+      };
+      const mockLineItemActions = [{ action: 'setLineItemTaxAmount', lineItemId: 'li-1' }];
+      const mockCartTotalAction = { action: 'setCartTotalTax', externalTotalGross: { centAmount: 3264, currencyCode: 'USD' } };
+
+      mockStripeClient.tax.calculations.retrieve.mockResolvedValue(mockCalculation);
+      updateActionService.createLineItemActionsFromCalculation.mockReturnValue(mockLineItemActions);
+      updateActionService.createCartTotalTaxAction.mockReturnValue(mockCartTotalAction);
+
+      const result = await taxOrchestratorService.reapplyExistingCalculation(makeCart());
+
+      expect(mockStripeClient.tax.calculations.retrieve).toHaveBeenCalledWith('taxcalc_abc123', { expand: ['line_items'] });
+      // The cart is deliberately not passed: the country labelling a zero-tax line item is read
+      // from the calculation, never from cart.country (SB3-218, ADR-007).
+      expect(updateActionService.createLineItemActionsFromCalculation).toHaveBeenCalledWith(mockCalculation, null);
+      expect(updateActionService.createCartTotalTaxAction).toHaveBeenCalledWith(mockCalculation);
+      expect(result).toEqual({ actions: [...mockLineItemActions, mockCartTotalAction] });
+    });
+
+    it('should omit cart total action when createCartTotalTaxAction returns null', async () => {
+      const mockCalculation = { id: 'taxcalc_abc123', amount_total: 0, currency: 'usd', line_items: { data: [] } };
+      const mockLineItemActions = [];
+
+      mockStripeClient.tax.calculations.retrieve.mockResolvedValue(mockCalculation);
+      updateActionService.createLineItemActionsFromCalculation.mockReturnValue(mockLineItemActions);
+      updateActionService.createCartTotalTaxAction.mockReturnValue(null);
+
+      const result = await taxOrchestratorService.reapplyExistingCalculation(makeCart());
+
+      expect(result).toEqual({ actions: [] });
+    });
+
+    it('should throw and log error when Stripe retrieve fails', async () => {
+      const stripeError = new Error('Stripe API error');
+      mockStripeClient.tax.calculations.retrieve.mockRejectedValue(stripeError);
+
+      await expect(taxOrchestratorService.reapplyExistingCalculation(makeCart())).rejects.toThrow('Stripe API error');
+      expect(logger.error).toHaveBeenCalledWith('Tax re-apply failed', expect.objectContaining({
+        cartId: 'cart-reapply-1',
+        calculationId: 'taxcalc_abc123'
+      }));
+    });
+
+    it('should not call orchestrateTaxCalculation or createCartUpdateActionsFromMultipleCalculations', async () => {
+      mockStripeClient.tax.calculations.retrieve.mockResolvedValue({
+        id: 'taxcalc_abc123', amount_total: 1000, currency: 'usd', line_items: { data: [] }
+      });
+      updateActionService.createLineItemActionsFromCalculation.mockReturnValue([]);
+      updateActionService.createCartTotalTaxAction.mockReturnValue({ action: 'setCartTotalTax' });
+      updateActionService.createShippingTaxUpdateAction.mockReturnValue(null);
+
+      await taxOrchestratorService.reapplyExistingCalculation(makeCart());
+
+      expect(updateActionService.createCartUpdateActionsFromMultipleCalculations).not.toHaveBeenCalled();
+      expect(mockStripeClient.tax.calculations.create).not.toHaveBeenCalled();
+    });
+
+    it('should include shipping tax action when cart has Single mode shippingInfo (Express Checkout case)', async () => {
+      const cart = makeCart({
+        shippingMode: 'Single',
+        shippingInfo: { shippingMethodName: 'Express US', price: { centAmount: 3000 } }
+      });
+      const mockCalculation = {
+        id: 'taxcalc_abc123', amount_total: 6800, currency: 'usd',
+        line_items: { data: [{ reference: 'li-1', amount: 3800, amount_tax: 302 }] },
+        shipping_cost: { amount: 3000, amount_tax: 0 }
+      };
+      const mockLineItemActions = [{ action: 'setLineItemTaxAmount', lineItemId: 'li-1' }];
+      const mockShippingAction = { action: 'setShippingMethodTaxAmount' };
+      const mockCartTotalAction = { action: 'setCartTotalTax' };
+
+      mockStripeClient.tax.calculations.retrieve.mockResolvedValue(mockCalculation);
+      updateActionService.createLineItemActionsFromCalculation.mockReturnValue(mockLineItemActions);
+      updateActionService.createShippingTaxUpdateAction.mockReturnValue(mockShippingAction);
+      updateActionService.createCartTotalTaxAction.mockReturnValue(mockCartTotalAction);
+
+      const result = await taxOrchestratorService.reapplyExistingCalculation(cart);
+
+      expect(updateActionService.createShippingTaxUpdateAction).toHaveBeenCalledWith(mockCalculation);
+      expect(result.actions).toEqual([...mockLineItemActions, mockShippingAction, mockCartTotalAction]);
+    });
+
+    it('should not include shipping tax action when shippingMode is Multiple', async () => {
+      const cart = makeCart({
+        shippingMode: 'Multiple',
+        shipping: [{ shippingKey: 'ship-1' }]
+      });
+      const mockCalculation = {
+        id: 'taxcalc_abc123', amount_total: 1000, currency: 'usd', line_items: { data: [] }
+      };
+
+      mockStripeClient.tax.calculations.retrieve.mockResolvedValue(mockCalculation);
+      updateActionService.createLineItemActionsFromCalculation.mockReturnValue([]);
+      updateActionService.createCartTotalTaxAction.mockReturnValue({ action: 'setCartTotalTax' });
+
+      await taxOrchestratorService.reapplyExistingCalculation(cart);
+
+      expect(updateActionService.createShippingTaxUpdateAction).not.toHaveBeenCalled();
+    });
+
+    it('should not include shipping tax action when shippingInfo is null', async () => {
+      const cart = makeCart({ shippingMode: 'Single', shippingInfo: null });
+      const mockCalculation = {
+        id: 'taxcalc_abc123', amount_total: 1000, currency: 'usd', line_items: { data: [] }
+      };
+
+      mockStripeClient.tax.calculations.retrieve.mockResolvedValue(mockCalculation);
+      updateActionService.createLineItemActionsFromCalculation.mockReturnValue([]);
+      updateActionService.createCartTotalTaxAction.mockReturnValue({ action: 'setCartTotalTax' });
+
+      await taxOrchestratorService.reapplyExistingCalculation(cart);
+
+      expect(updateActionService.createShippingTaxUpdateAction).not.toHaveBeenCalled();
     });
   });
 
@@ -445,6 +594,7 @@ describe('TaxOrchestratorService', () => {
         country: 'US',
         shippingMode: 'Single',
         shippingAddress: {
+          country: 'US',
           state: 'NY',
           city: 'New York',
           postalCode: '10001',
@@ -473,6 +623,7 @@ describe('TaxOrchestratorService', () => {
           {
             shippingKey: 'shipping-1',
             shippingAddress: {
+              country: 'US',
               state: 'CA',
               city: 'Los Angeles',
               postalCode: '90001',
@@ -591,6 +742,7 @@ describe('TaxOrchestratorService', () => {
         country: 'US',
         shippingMode: 'Single',
         shippingAddress: {
+          country: 'US',
           state: 'NY',
           city: 'New York',
           postalCode: '10001'
@@ -617,6 +769,98 @@ describe('TaxOrchestratorService', () => {
       expect(requests).toHaveLength(1);
       expect(requests[0].ship_from_details).toBeUndefined();
     });
+
+    it('should apply the resolved line item tax behavior to shipping_cost instead of hardcoding exclusive (business-rules/tax-calculation.md Rule 6)', async () => {
+      const group = {
+        shipFromAddress: null,
+        lineItems: [
+          {
+            id: 'line-item-1',
+            productId: 'product-1',
+            quantity: 1,
+            totalPrice: { centAmount: 1000 }
+          }
+        ]
+      };
+
+      const cart = {
+        country: 'DE',
+        shippingMode: 'Single',
+        shippingAddress: {
+          country: 'DE',
+          state: 'BE',
+          city: 'Berlin',
+          postalCode: '10115'
+        },
+        totalPrice: { currencyCode: 'EUR' },
+        shippingInfo: {
+          price: { centAmount: 500 }
+        }
+      };
+
+      // Simulates a country configured for inclusive tax behavior via TAX_BEHAVIOR_COUNTRY_MAPPING
+      const taxBehaviors = { 'line-item-1': 'inclusive' };
+      const categoriesMap = new Map([['product-1', []]]);
+
+      taxCodeService.getTaxCodeForProduct.mockReturnValue('txcd_12345678');
+      taxCodeService.getShippingTaxCodeFromShippingInfo.mockResolvedValue('txcd_87654321');
+
+      const requests = await taxOrchestratorService.createRequestsForGroup(
+        group,
+        cart,
+        taxBehaviors,
+        categoriesMap
+      );
+
+      expect(requests[0].line_items[0].tax_behavior).toBe('inclusive');
+      expect(requests[0].shipping_cost.tax_behavior).toBe('inclusive');
+    });
+
+    it('should omit shipping_cost.tax_behavior when no behavior was determined for the cart', async () => {
+      const group = {
+        shipFromAddress: null,
+        lineItems: [
+          {
+            id: 'line-item-1',
+            productId: 'product-1',
+            quantity: 1,
+            totalPrice: { centAmount: 1000 }
+          }
+        ]
+      };
+
+      const cart = {
+        country: 'US',
+        shippingMode: 'Single',
+        shippingAddress: {
+          country: 'US',
+          state: 'NY',
+          city: 'New York',
+          postalCode: '10001'
+        },
+        totalPrice: { currencyCode: 'USD' },
+        shippingInfo: {
+          price: { centAmount: 500 }
+        }
+      };
+
+      // No entry for 'line-item-1' — simulates no country mapping and no merchant default configured
+      const taxBehaviors = {};
+      const categoriesMap = new Map([['product-1', []]]);
+
+      taxCodeService.getTaxCodeForProduct.mockReturnValue('txcd_12345678');
+      taxCodeService.getShippingTaxCodeFromShippingInfo.mockResolvedValue('txcd_87654321');
+
+      const requests = await taxOrchestratorService.createRequestsForGroup(
+        group,
+        cart,
+        taxBehaviors,
+        categoriesMap
+      );
+
+      expect(requests[0].line_items[0].tax_behavior).toBeUndefined();
+      expect(requests[0].shipping_cost.tax_behavior).toBeUndefined();
+    });
   });
 
   describe('createSeparatedRequestsByShippingKey', () => {
@@ -639,6 +883,7 @@ describe('TaxOrchestratorService', () => {
           {
             shippingKey: 'shipping-1',
             shippingAddress: {
+              country: 'US',
               state: 'NY',
               city: 'New York',
               postalCode: '10001'
@@ -700,6 +945,7 @@ describe('TaxOrchestratorService', () => {
           {
             shippingKey: 'shipping-1',
             shippingAddress: {
+              country: 'US',
               state: 'NY',
               city: 'New York',
               postalCode: '10001'
@@ -726,6 +972,70 @@ describe('TaxOrchestratorService', () => {
 
       // Line item with amount 0 should be filtered out
       expect(requests[0].line_items.length).toBe(0);
+    });
+
+    it('should apply the resolved line item tax behavior to shipping_cost in Multiple mode instead of hardcoding exclusive (business-rules/tax-calculation.md Rule 6)', async () => {
+      const group = {
+        shipFromAddress: {
+          country: 'US',
+          state: 'CA',
+          city: 'San Francisco',
+          postal_code: '94102'
+        },
+        lineItems: [
+          {
+            id: 'line-item-1',
+            productId: 'product-1',
+            quantity: 1,
+            totalPrice: { centAmount: 1000 },
+            shippingDetails: {
+              targets: [
+                {
+                  shippingMethodKey: 'shipping-1',
+                  quantity: 1
+                }
+              ]
+            }
+          }
+        ]
+      };
+
+      const cart = {
+        country: 'DE',
+        shippingMode: 'Multiple',
+        totalPrice: { currencyCode: 'EUR' },
+        shipping: [
+          {
+            shippingKey: 'shipping-1',
+            shippingAddress: {
+              country: 'DE',
+              state: 'BE',
+              city: 'Berlin',
+              postalCode: '10115'
+            },
+            shippingInfo: {
+              price: { centAmount: 500 }
+            }
+          }
+        ]
+      };
+
+      // Simulates a country configured for inclusive tax behavior via TAX_BEHAVIOR_COUNTRY_MAPPING
+      const taxBehaviors = { 'line-item-1': 'inclusive' };
+      const categoriesMap = new Map([['product-1', []]]);
+
+      taxCodeService.getTaxCodeForProduct.mockReturnValue('txcd_12345678');
+      taxCodeService.getShippingTaxCodeFromShippingInfo.mockResolvedValue('txcd_87654321');
+
+      const requests = await taxOrchestratorService.createRequestsForGroup(
+        group,
+        cart,
+        taxBehaviors,
+        categoriesMap
+      );
+
+      expect(requests[0].line_items[0].tax_behavior).toBe('inclusive');
+      expect(requests[0].shipping_cost.tax_behavior).toBe('inclusive');
     });
   });
 

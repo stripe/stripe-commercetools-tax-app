@@ -12,15 +12,23 @@ class TaxBehaviorService {
   }
 
   /**
-   * Determine tax behavior for cart line items with priority-based fallback logic
-   * Tax behavior is determined once at the cart level and applied to all line items
+   * Determine tax behavior for cart line items with priority-based fallback logic.
+   *
+   * The country mapping is keyed on the **destination** — where the order is delivered — not on
+   * `cart.country`. `cart.country` selects prices and is shopper-controlled, so keying on it let
+   * a shopper pick the behavior: forcing `inclusive` on a price published as exclusive makes
+   * Stripe carve the tax out of the amount instead of adding it, and the merchant remits it from
+   * their own margin. Stripe documents that with inclusive behavior "the amount your customer
+   * pays remains constant, regardless of the tax amount" (SB3-218).
+   *
    * @param {Object} cartRequest - commercetools cart request
+   * @param {string|null} destinationCountry - Country of the delivery address for this request
    * @returns {Object} Tax behavior configuration for each line item
    */
-  determineTaxBehaviorForCart(cartRequest) {
-    // Determine tax behavior once at cart level
-    const cartTaxBehavior = this.determineCartTaxBehavior(cartRequest);
-    
+  determineTaxBehaviorForCart(cartRequest, destinationCountry = null) {
+    // Determine tax behavior once for this destination
+    const cartTaxBehavior = this.determineCartTaxBehavior(cartRequest, destinationCountry);
+
     // Apply the same behavior to all line items
     const lineItemBehaviors = {};
     for (const lineItem of cartRequest.lineItems) {
@@ -38,11 +46,11 @@ class TaxBehaviorService {
    * 
    * Returns null if no behavior is determined, letting Stripe use its own default behavior
    */
-  determineCartTaxBehavior(cartContext) {
-    // Priority 1: Country-based behavior (country mapping)
-    const countryBehavior = this.getCountryBasedBehavior(cartContext);
+  determineCartTaxBehavior(cartContext, destinationCountry = null) {
+    // Priority 1: Country-based behavior, keyed on the delivery destination
+    const countryBehavior = this.getCountryBasedBehavior(destinationCountry);
     if (countryBehavior) {
-      logger.debug(`Using country-based tax behavior for country ${cartContext.country}: ${countryBehavior}`);
+      logger.debug(`Using country-based tax behavior for destination ${destinationCountry}: ${countryBehavior}`);
       return countryBehavior;
     }
 
@@ -60,10 +68,17 @@ class TaxBehaviorService {
 
 
   /**
-   * Get tax behavior based on country mapping configuration
+   * Get tax behavior based on country mapping configuration.
+   *
+   * Takes the country code itself rather than the cart, so the caller has to be explicit about
+   * *which* country it means. With no destination there is no destination-based rule to apply,
+   * and resolution falls through to the merchant default and then to the account's own Stripe
+   * Tax setting — which, on Stripe's recommended "Automatic", is currency-based.
+   *
+   * @param {string|null} countryCode - Destination country code
+   * @returns {string|null} Tax behavior, or null if no mapping applies
    */
-  getCountryBasedBehavior(cartContext) {
-    const countryCode = cartContext.country;
+  getCountryBasedBehavior(countryCode) {
     if (!countryCode) {
       return null;
     }
@@ -164,24 +179,28 @@ class TaxBehaviorService {
   /**
    * Log tax behavior decision for audit purposes
    */
-  logBehaviorDecision(lineItem, behavior, cartContext) {
+  logBehaviorDecision(lineItem, behavior, cartContext, destinationCountry = null) {
     logger.debug('Tax behavior assignment', {
       productId: lineItem.productId,
       variantId: lineItem.variant?.id,
       assignedBehavior: behavior,
       currency: lineItem.totalPrice?.currencyCode,
-      country: cartContext.country,
-      decisionReason: this.getDecisionReason(cartContext, behavior),
+      // Both countries are logged on purpose: when they differ, the log is the only place that
+      // shows the cart was priced for one market and delivered to another.
+      destinationCountry,
+      priceSelectionCountry: cartContext?.country,
+      decisionReason: this.getDecisionReason(destinationCountry, behavior),
       timestamp: new Date().toISOString()
     });
   }
 
   /**
    * Determine the reason for the tax behavior decision
+   * @param {string|null} destinationCountry - Destination country code
    */
-  getDecisionReason(cartContext, _behavior) {
+  getDecisionReason(destinationCountry, _behavior) {
     // Check if it came from country mapping
-    if (this.getCountryBasedBehavior(cartContext)) {
+    if (this.getCountryBasedBehavior(destinationCountry)) {
       return 'country_mapping';
     }
 

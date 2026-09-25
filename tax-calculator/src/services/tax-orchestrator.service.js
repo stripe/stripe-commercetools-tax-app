@@ -2,10 +2,12 @@ import { logger } from '../utils/logger.utils.js';
 import { createStripeClient } from '../clients/stripe.client.js';
 import shipFromService from './ship-from.service.js';
 import ShipFromNotFoundError from '../errors/shipFromNotFoundError.js';
+import InvalidTaxDestinationError from '../errors/invalidTaxDestination.error.js';
 import { taxBehaviorService } from './tax-behavior.service.js';
 import categoryService from './category.service.js';
 import taxCodeService from './tax-code.service.js';
 import updateActionService from './update-action.service.js';
+import { CART_TAX_FIELD_NAMES } from '../connectors/customTypes.js';
 
 /**
  * Tax Orchestrator Service
@@ -36,19 +38,20 @@ class TaxOrchestratorService {
         lineItemsCount: cart.lineItems?.length || 0
       });
 
-      // STEP 1: Determine tax behavior for cart (applied to all line items)
-      const taxBehaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
+      // STEP 1: Determine tax behavior from the delivery destination, not from cart.country
+      const destinationCountry = this.resolveDestinationCountry(cart);
+      const taxBehaviors = taxBehaviorService.determineTaxBehaviorForCart(cart, destinationCountry);
       const cartTaxBehavior = taxBehaviors[cart.lineItems[0]?.id]; // All line items have same behavior
-      
+
       logger.info(
         cartTaxBehavior
           ? `Cart tax behavior determined: ${cartTaxBehavior}`
           : 'No cart tax behavior was determined; no behavior will be set on the line items, letting Stripe use its default behavior'
       );
-      
+
       // Log the cart-level decision once for audit purposes
       if (cart.lineItems.length > 0) {
-        taxBehaviorService.logBehaviorDecision(cart.lineItems[0], cartTaxBehavior, cart);
+        taxBehaviorService.logBehaviorDecision(cart.lineItems[0], cartTaxBehavior, cart, destinationCountry);
       }
 
       // STEP 2: Get categories for products
@@ -273,11 +276,18 @@ class TaxOrchestratorService {
     if (shippingCost?.amount) {
       request.shipping_cost = {
         amount: shippingCost.amount,
-        tax_code: shippingCost.tax_code,
-        tax_behavior: 'exclusive'
+        tax_code: shippingCost.tax_code
       };
+      // Shipping follows the same resolved tax behavior as line items (country mapping,
+      // then merchant default, then Stripe's own default if neither is configured) —
+      // see business-rules/tax-calculation.md Rule 6 (corrected 2026-07-28; previously
+      // hardcoded to 'exclusive' regardless of TAX_BEHAVIOR_COUNTRY_MAPPING).
+      const shippingBehavior = taxBehaviors[group.lineItems[0]?.id];
+      if (shippingBehavior) {
+        request.shipping_cost.tax_behavior = shippingBehavior;
+      }
     }
-    
+
     return request;
   }
 
@@ -293,11 +303,23 @@ class TaxOrchestratorService {
   async createSeparatedRequestsByShippingKey(group, cart, taxBehaviors, categoriesMap) {
     const shippingCostsMap = await this.fetchShippingCostsMap(cart);
     const requests = [];
-    
+    const cartDestination = this.resolveDestinationCountry(cart);
+
     // Create one request per shipping method
     for (const shipping of cart.shipping) {
       const request = this.buildRequestForShippingMethod(shipping, group, cart);
-      this.populateRequestWithLineItems(request, group, shipping, cart, taxBehaviors, categoriesMap, shippingCostsMap);
+
+      // A Multiple-mode cart can deliver to several countries, and the tax behavior follows the
+      // destination. Only recompute when this shipping method goes somewhere else than the cart
+      // as a whole, so the ordinary single-destination cart keeps one resolution.
+      const destination = this.resolveDestinationCountry(cart, shipping);
+      const behaviorsForDestination = destination === cartDestination
+        ? taxBehaviors
+        : taxBehaviorService.determineTaxBehaviorForCart(cart, destination);
+
+      this.populateRequestWithLineItems(
+        request, group, shipping, cart, behaviorsForDestination, categoriesMap, shippingCostsMap
+      );
       
       // Only add request if it has line items or shipping cost
       // Avoid creating empty requests to Stripe
@@ -393,9 +415,14 @@ class TaxOrchestratorService {
     if (shippingCost?.amount) {
       request.shipping_cost = {
         amount: shippingCost.amount,
-        tax_code: shippingCost.tax_code,
-        tax_behavior: 'exclusive'
+        tax_code: shippingCost.tax_code
       };
+      // Shipping follows the same resolved tax behavior as line items — see
+      // business-rules/tax-calculation.md Rule 6 (corrected 2026-07-28).
+      const shippingBehavior = taxBehaviors[group.lineItems[0]?.id];
+      if (shippingBehavior) {
+        request.shipping_cost.tax_behavior = shippingBehavior;
+      }
     }
   }
 
@@ -483,32 +510,111 @@ class TaxOrchestratorService {
   }
 
   /**
-   * Extract customer address from cart
+   * Extract the tax destination address from the cart.
+   *
+   * Stripe treats `customer_details.address` as the transaction destination, so every field of
+   * it — the country included — comes from the delivery address. `cart.country` selects prices
+   * in commercetools and is shopper-controlled; it is not a statement about where the order is
+   * delivered, and using it here let a shopper move the sale to another jurisdiction while the
+   * goods still went to the original address (SB3-218).
+   *
+   * `cart.country` survives only as the fallback for a cart that has no delivery address at all,
+   * so a cart still calculates before the shopper has entered one.
+   *
    * @param {Object} cart - commercetools cart
+   * @param {Object} [shipping] - The shipping method being priced, in Multiple shipping mode
    * @returns {Object} Stripe-formatted customer address
+   * @throws {InvalidTaxDestinationError} If a delivery address is present but carries no country
    */
   extractCustomerAddress(cart, shipping = null) {
     let shippingAddress = {};
-    
+    let shippingKey = null;
+
     if (cart.shippingMode === 'Single') {
       shippingAddress = cart.shippingAddress || {};
     } else if (cart.shippingMode === 'Multiple') {
       // Use the specific shipping address if provided, otherwise fall back to first
       if (shipping?.shippingAddress) {
         shippingAddress = shipping.shippingAddress;
+        shippingKey = shipping.shippingKey ?? null;
       } else if (cart.shipping?.length > 0) {
         shippingAddress = cart.shipping[0]?.shippingAddress || {};
+        shippingKey = cart.shipping[0]?.shippingKey ?? null;
       }
     }
-    
+
+    this.assertDestinationIsUsable(shippingAddress, shippingKey);
+
     return {
-      country: cart.country,
+      // No delivery address at all → fall back to cart.country. Never mix the two: a delivery
+      // address that exists always carries its own country (commercetools requires it), and
+      // assertDestinationIsUsable has already rejected any that does not.
+      country: shippingAddress.country || cart.country,
       state: shippingAddress.state,
       city: shippingAddress.city,
       postal_code: shippingAddress.postalCode,
       line1: shippingAddress.streetName || shippingAddress.line1,
       line2: shippingAddress.streetNumber || shippingAddress.line2
     };
+  }
+
+  /**
+   * The country the order is delivered to — the country that decides the tax treatment.
+   *
+   * Reads through extractCustomerAddress so there is exactly one definition of "the destination"
+   * in this service: whatever Stripe is told the destination is, is what the tax behavior is
+   * resolved from. The two cannot drift apart.
+   *
+   * @param {Object} cart - commercetools cart
+   * @param {Object} [shipping] - The shipping method being priced, in Multiple shipping mode
+   * @returns {string|undefined} Destination country code, or undefined if the cart has no address
+   */
+  resolveDestinationCountry(cart, shipping = null) {
+    return this.extractCustomerAddress(cart, shipping).country;
+  }
+
+  /**
+   * Every country this cart currently delivers to, in the same shape update-action.service.js
+   * records alongside a calculation — sorted, comma-separated, deduplicated — so the two can be
+   * compared directly when deciding whether a stored calculation may be re-applied.
+   *
+   * @param {Object} cart - commercetools cart
+   * @returns {string} Sorted, comma-separated destination countries
+   */
+  summariseCartDestinations(cart) {
+    const destinations = cart.shippingMode === 'Multiple' && cart.shipping?.length
+      ? cart.shipping.map(shipping => this.resolveDestinationCountry(cart, shipping))
+      : [this.resolveDestinationCountry(cart)];
+
+    return [...new Set(destinations.filter(Boolean))].sort().join(',');
+  }
+
+  /**
+   * Reject a delivery address that locates the order without naming its country.
+   *
+   * commercetools requires `country` on every Address, so this combination cannot arrive through
+   * the normal cart API. Completing it from `cart.country` would send Stripe an address that
+   * exists in no single jurisdiction — exactly the hybrid destination behind SB3-218 — so the
+   * cart update is refused instead.
+   *
+   * An entirely empty address is not an error: that is a cart that has not collected one yet.
+   *
+   * @param {Object} shippingAddress - Delivery address as received from commercetools
+   * @param {string|null} shippingKey - Shipping method key, in Multiple shipping mode
+   * @throws {InvalidTaxDestinationError}
+   * @private
+   */
+  assertDestinationIsUsable(shippingAddress, shippingKey) {
+    if (shippingAddress?.country) {
+      return;
+    }
+
+    const locatesTheOrder = ['city', 'postalCode', 'streetName', 'state', 'line1']
+      .some(field => shippingAddress?.[field]);
+
+    if (locatesTheOrder) {
+      throw new InvalidTaxDestinationError(shippingAddress, shippingKey);
+    }
   }
 
   /**
@@ -585,6 +691,90 @@ class TaxOrchestratorService {
   });
     
     return successful;
+  }
+
+  /**
+   * Re-apply an existing Stripe Tax calculation to the cart without creating a new one.
+   *
+   * Used when CT clears taxedPrice after a cart update (e.g. setShippingAddress) while
+   * paymentInfo is already attached — the normal extension guard blocks recalculation,
+   * so we retrieve the existing calculation by ID and re-emit the same update actions.
+   * The PI already holds the original calculationId via hooks.inputs.tax.calculation,
+   * so using retrieve() keeps PI, cart, and order-syncer on the same reference.
+   *
+   * @param {Object} cart - commercetools cart object (must have custom.fields.connectorStripeTax_calculationReferences)
+   * @returns {Promise<Object>} Response object with update actions
+   */
+  async reapplyExistingCalculation(cart) {
+    const startTime = Date.now();
+    const calculationId = cart.custom?.fields?.connectorStripeTax_calculationReferences?.[0];
+    if (!calculationId) {
+      throw new Error(`reapplyExistingCalculation called on cart ${cart.id} with no calculationReferences`);
+    }
+
+    // Re-applying trusts a stored calculation without asking Stripe again, so it is only safe
+    // while that calculation still belongs to where the order is going. A calculation stored
+    // before SB3-218 carries no destination at all and may have been made against a shopper's
+    // cart.country; recalculating is how the fix reaches carts that already exist.
+    const storedDestinations = cart.custom?.fields?.[CART_TAX_FIELD_NAMES.DESTINATION_COUNTRY];
+    const currentDestinations = this.summariseCartDestinations(cart);
+
+    if (!storedDestinations || storedDestinations !== currentDestinations) {
+      logger.info('Stored calculation does not match the cart destination — recalculating', {
+        cartId: cart.id,
+        calculationId,
+        storedDestinations: storedDestinations || 'none recorded',
+        currentDestinations
+      });
+      return this.orchestrateTaxCalculation(cart);
+    }
+
+    try {
+      logger.info('Retrieving existing Stripe Tax calculation for re-apply', {
+        cartId: cart.id,
+        calculationId
+      });
+
+      const stripeClient = createStripeClient();
+      const calculation = await stripeClient.tax.calculations.retrieve(calculationId, {
+        expand: ['line_items']
+      });
+
+      const lineItemActions = updateActionService.createLineItemActionsFromCalculation(
+        calculation,
+        null
+      );
+
+      const shippingTaxAction = cart.shippingMode === 'Single' && cart.shippingInfo
+        ? updateActionService.createShippingTaxUpdateAction(calculation)
+        : null;
+
+      const cartTotalTaxAction = updateActionService.createCartTotalTaxAction(calculation);
+
+      const actions = [
+        ...lineItemActions,
+        ...(shippingTaxAction ? [shippingTaxAction] : []),
+        ...(cartTotalTaxAction ? [cartTotalTaxAction] : [])
+      ];
+
+      logger.info('Tax re-apply completed', {
+        cartId: cart.id,
+        calculationId,
+        actionsCount: actions.length,
+        duration: Date.now() - startTime
+      });
+
+      return { actions };
+
+    } catch (error) {
+      logger.error('Tax re-apply failed', {
+        cartId: cart.id,
+        calculationId,
+        error: error.message,
+        duration: Date.now() - startTime
+      });
+      throw error;
+    }
   }
 
   /**

@@ -25,13 +25,12 @@
     "babel-jest": "^29.7.0",
     "eslint": "^8.57.1",
     "jest": "^29.7.0",
-    "mocha": "^10.8.2",
-    "nodemon": "^3.1.11",
+"nodemon": "^3.1.11",
     "prettier": "^3.7.3",
     "supertest": "^7.1.4"
   },
   "dependencies": {
-    "@commercetools-backend/loggers": "^22.29.0",
+    "@commercetools-backend/loggers": "^27.6.2",
     "@commercetools/platform-sdk": "^7.9.0",
     "@commercetools/sdk-client-v2": "^2.2.0",
     "body-parser": "^1.20.1",

@@ -1,171 +1,145 @@
-# Tax Calculator
-This module provides an application based on [commercetools Connect](https://docs.commercetools.com/connect), which will be triggered by the [extension](https://docs.commercetools.com/tutorials/extensions) from commercetools project once there is a cart created/updated. The corresponding cart details are then synchronized to the external tax provider to calculate tax amount.
+# Tax Calculator Module
 
-The module also provides scripts for post-deployment and pre-undeployment action. After deployment via connect service completed, [commercetools Extension](https://docs.commercetools.com/tutorials/extensions) is created by post-deployment script which listen to any cart create/update action in commercetools Project. Once cart has been created/updated, the commercetools Extension triggers an API of tax calculator module to handle the corresponding changes.
+The Tax Calculator module is a [commercetools Connect](https://docs.commercetools.com/connect) service that provides real-time tax calculation using [Stripe Tax](https://stripe.com/tax). It is triggered automatically by a commercetools [API Extension](https://docs.commercetools.com/api/projects/api-extensions) when a cart is created or updated.
 
-## Get started
-#### Change the key of commercetools Subscription
-Please specify your desired key for creation of commercetools Extension [here](https://github.com/commercetools/connect-tax-integration-template/blob/dbdce163f08b36d8635d7705dd58c89d03bf8399/tax-calculator/src/connectors/constants.js#L2C50-L2C75).
-The default key is 'ctpTaxCalculatorExtension'.
+## Overview
 
-#### Install your tax-provider SDK 
-Please run following npm command under order-syncer folder to install the NodeJS SDK provided by tax provider.
+This module calculates sales tax for cart line items and shipping by:
+
+1. Receiving cart data from commercetools via API Extension
+2. Resolving tax codes from product categories
+3. Determining ship-from addresses for accurate tax jurisdiction
+4. Calling Stripe Tax API for tax calculation
+5. Returning commercetools update actions to apply taxes to the cart
+
+## Key Features
+
+- **Real-time Tax Calculation**: Automatic tax calculation when carts are created/updated
+- **Address Validation**: Two-tier validation (local rules + Stripe verification) with 23 country-specific formats
+- **Tax Code Resolution**: 5-strategy hierarchical lookup with parent category traversal (max depth 10)
+- **Ship-From Resolution**: Multi-strategy address resolution (line item supply channel, inventory entry channel, default)
+- **Tax Behavior Configuration**: Configurable inclusive/exclusive tax by country mapping or merchant default
+- **Multiple Shipping Support**: Handles Single and Multiple shipping modes with proportional line item distribution
+- **Multi-Warehouse Support**: Groups line items by ship-from address for accurate tax jurisdiction
+- **Category Caching**: In-memory cache with 5-minute TTL for performance
+- **Batch Processing**: Efficient handling of large catalogs (>500 products) with max 5 concurrent requests
+- **Tax Breakdown Matching**: 3-strategy algorithm for accurate rate application
+- **Shipping Tax Code Lookup**: Retrieves tax codes from custom fields on shipping methods
+
+## Prerequisites
+
+Before using this module, ensure you have:
+
+1. **commercetools Project**: Active project with API client credentials
+2. **Stripe Account**: Stripe Tax enabled with head office address configured
+3. **Tax Registration**: Completed for countries where you sell
+
+## Quick Start
+
+### Installation
 
 ```bash
-$ npm install <tax-provider-sdk>
+cd tax-calculator
+npm install
 ```
-#### Install dependencies
+
+### Local Development
+
+1. Copy `.env.example` to `.env` and fill in your credentials
+2. Create a commercetools API Extension pointing to your local server
+3. Use [ngrok](https://ngrok.com/) to expose your local server to the internet
+4. Start the development server:
+
 ```bash
-$ npm install
+npm run start:dev
 ```
-#### Run unit test
+
+### Running Tests
+
 ```bash
-$ npm run test:unit
+# Unit tests
+npm run test:unit
+
+# Integration tests
+npm run test:integration
+
+# All tests
+npm run test
 ```
-#### Run integration test
+
+### Deployment Scripts
+
 ```bash
-$ npm run test:integration
-```
-#### Run the application in local environment
-```bash
-$ npm run start
-```
-#### Run post-deploy script in local environment
-```bash
-$ npm run connector:post-deploy
-```
-#### Run pre-undeploy script in local environment
-```bash
-$ npm run connector:pre-undeploy
+# Post-deploy: Creates extension and custom types
+npm run connector:post-deploy
+
+# Pre-undeploy: Removes extension and cleans up
+npm run connector:pre-undeploy
 ```
 
-## Development in local environment
-Different from staging and production environments, in which the out-of-the-box setup and variables have been set by connect service during deployment, the tax-calculator requires additional operations in local environment for development.
-#### Create Commercetools Extension in your Commercetools Project
-When a service-type connector application is deployed via connect service, a Commercetools Extension is created automatically. However, it does not apply on local environment. To develop the tax-calculator in local environment, you need to follow the steps below:
-1. Create a Commercetools Extension.
-2. Use HTTP tunnel tools like [ngrok](https://ngrok.com/docs/getting-started) to expose your local development server to internet.
-3. Set the URL provided by the tunnel tool as the destination in Extension, so that event can be triggered to the tax-calculator in your local environment.
-
-For details, please refer [here](https://docs.commercetools.com/tutorials/extensions).
-
-#### Set the required environment variables
-
-Before starting the development, we advise users to create a .env file in order to help them in local development.
-      
-Refer [here](https://github.com/commercetools/connect-tax-integration-template/tree/fix-documentation#deployment-configuration) for more details about the environment variables required for tax-calculator application to run.
-
-## Tax Behavior Configuration
-
-The tax calculator supports configurable tax behavior to ensure accurate tax display and calculation based on regional practices, product types, and merchant preferences.
-
-### Overview
-
-Tax behavior determines how tax is calculated and displayed to customers, which is critical for providing accurate pricing expectations and compliance with regional tax display requirements.
-
-### Tax Behavior Options
-
-#### 1. Inclusive
-- Tax is already included in the listed price
-- Customer pays: List Price (which includes tax)
-- Common in Europe, Australia, many other regions
-- Often required by law for B2C transactions
-
-#### 2. Exclusive
-- Tax is added on top of the listed price
-- Customer pays: List Price + Tax
-- Common in North America (US, Canada)
-- Preferred for B2B transactions
-
-#### 3. Stripe Default
-- If no behavior is determined, Stripe will use its own default behavior
-- Stripe's automatic behavior varies by currency and region
-
-### Configuration Levels
-
-The tax behavior is determined using the following priority order:
-
-1. **Country Mapping** - If `TAX_BEHAVIOR_COUNTRY_MAPPING` is configured and the shipping country matches a country in the mapping, that behavior is used
-2. **Merchant Default** - Falls back to `TAX_BEHAVIOR_DEFAULT` value (if configured)
-3. **Stripe Default** - If no behavior is determined, Stripe will use its own default behavior
-
-### Environment Variables
-
-#### TAX_BEHAVIOR_DEFAULT
-Sets the default tax behavior for all tax calculations when no other rules apply.
-
-**Valid values:**
-- `inclusive` - Tax is included in the displayed price
-- `exclusive` - Tax is added on top of the displayed price
-
-**Example:**
-```bash
-TAX_BEHAVIOR_DEFAULT=exclusive
-```
-
-> **_NOTE:_** If this environment variable isn't set, then the post-deploy script of the connector will attempt to fetch a default setting from some PSP Tax Providers, such as Stripe. See [Stripe Tax Behavior Settings](https://docs.stripe.com/tax/products-prices-tax-codes-tax-behavior#tax-behavior)
-
-#### TAX_BEHAVIOR_COUNTRY_MAPPING
-JSON object mapping country codes to their default tax behavior. This allows different tax behaviors for different markets.
-
-**Optional:** If not provided, the system will skip country-based behavior determination and proceed to merchant default.
-
-**Format:**
-```json
-{
-  "US": "exclusive",
-  "CA": "exclusive", 
-  "DE": "inclusive",
-  "FR": "inclusive",
-  "AU": "inclusive",
-  "GB": "inclusive"
-}
-```
-
-**Example:**
-```bash
-TAX_BEHAVIOR_COUNTRY_MAPPING='{"US":"exclusive","DE":"inclusive","FR":"inclusive"}'
-```
-
-## Available Endpoints
-
-The tax calculator module provides the following REST API endpoints:
+## API Endpoints
 
 ### POST /taxCalculator
-Main endpoint for tax calculation. Triggered automatically by commercetools API Extension when a cart is created or updated.
 
-**Request:**
-- Triggered by commercetools API Extension
-- Receives cart object in request body (frozen state, ExternalAmount tax mode)
+Main endpoint for tax calculation. Triggered automatically by commercetools API Extension.
+
+**Trigger Conditions (DSL):**
+```
+taxMode="ExternalAmount"
+AND lineItems is defined AND lineItems is not empty
+AND (shippingInfo is defined OR lineItems(shippingDetails is defined))
+AND (
+  paymentInfo is not defined
+  OR (taxedPrice is not defined AND custom(fields(connectorStripeTax_calculationReferences is defined)))
+  OR (shippingMode="Single" AND shippingInfo is defined AND shippingInfo(taxedPrice is not defined)
+      AND custom(fields(connectorStripeTax_calculationReferences is defined)))
+)
+AND (taxMode OR lineItems OR shippingInfo OR shippingAddress OR shipping OR itemShippingAddresses has changed)
+```
+
+**Key Behaviors:**
+- **Normal path**: skips when `paymentInfo` exists and cart is already fully taxed
+- **Re-apply path**: when `paymentInfo` is present but `taxedPrice` was cleared by a CT platform update (e.g. `setShippingAddress`) and `connectorStripeTax_calculationReferences` already exist on the cart, retrieves the existing Stripe calculation and re-emits the same update actions without creating a new calculation
+
+**Timeout:** 2000ms
 
 **Response:**
-- Returns commercetools update actions for applying calculated taxes to the cart
-- Status: `202 Accepted` on success
-- Status: `400 Bad Request` on validation errors
-- Status: `500 Internal Server Error` on system errors
-
-**Example Response:**
 ```json
 {
   "actions": [
     {
       "action": "setCustomType",
-      "type": { "key": "stripe-tax", "typeId": "type" },
-      "fields": { ... }
+      "type": { "key": "connector-stripe-tax-calculation-reference", "typeId": "type" },
+      "fields": { "calculationReferences": ["calcref_xxx"] }
     },
     {
       "action": "setLineItemTaxAmount",
       "lineItemId": "line-item-id",
-      "externalTaxAmount": { ... }
+      "externalTaxAmount": {
+        "totalGross": { "centAmount": 10800, "currencyCode": "USD" },
+        "taxRate": {
+          "name": "Sales Tax",
+          "amount": 0.08,
+          "includedInPrice": false,
+          "country": "US",
+          "state": "CA"
+        }
+      }
     }
   ]
 }
 ```
 
-### POST /validateAddress
-Endpoint for address validation. Validates shipping addresses using local business rules and Stripe Tax API verification.
+**Status Codes:**
+- `202 Accepted`: Tax calculation successful
+- `400 Bad Request`: Validation errors (missing address, invalid tax code)
+- `500 Internal Server Error`: System errors
 
-**Request Body:**
+### POST /validateAddress
+
+Validates shipping addresses using local rules and Stripe verification.
+
+**Request:**
 ```json
 {
   "address": {
@@ -183,181 +157,276 @@ Endpoint for address validation. Validates shipping addresses using local busine
 {
   "success": true,
   "validation": {
-    "local": {
-      "isValid": true,
-      "errors": []
-    },
-    "stripe": {
-      "accepted": true
-    }
+    "local": { "isValid": true, "errors": [] },
+    "stripe": { "accepted": true }
   },
-  "address": {
-    "suggestions": []
-  }
+  "address": { "suggestions": [] }
 }
 ```
 
-**Rate Limiting:**
-- Configurable via `ADDRESS_VALIDATION_RATE_LIMIT` (default: 100 requests/minute)
-- Time window configurable via `ADDRESS_VALIDATION_WINDOW_MINUTES` (default: 1 minute)
+## Configuration
 
-**Status Codes:**
-- `200 OK`: Validation completed (check `success` field for result)
-- `429 Too Many Requests`: Rate limit exceeded
-- `400 Bad Request`: Invalid request format
+### Required Environment Variables
 
-## Services Overview
+| Variable | Description |
+|----------|-------------|
+| `CTP_PROJECT_KEY` | commercetools project key |
+| `CTP_CLIENT_ID` | commercetools API client ID |
+| `CTP_CLIENT_SECRET` | commercetools API client secret |
+| `CTP_SCOPE` | commercetools API client scope |
+| `CTP_REGION` | commercetools project region (e.g., `us-central1.gcp`, `europe-west1.gcp`) |
+| `STRIPE_API_TOKEN` | Stripe API secret key (starts with `sk_live_` or `sk_test_`) |
+| `TAX_CODE_CATEGORY_MAPPING_JSON` | JSON mapping commercetools categories to Stripe tax codes |
 
-The tax calculator module is built using a service-oriented architecture with the following core services:
+### Tax Behavior Configuration
 
-### Tax Orchestrator Service
-**Purpose**: Main orchestration service that coordinates the complete tax calculation flow.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TAX_BEHAVIOR_DEFAULT` | Default tax behavior (`inclusive` or `exclusive`) | `exclusive` |
+| `TAX_BEHAVIOR_COUNTRY_MAPPING` | JSON mapping country codes to tax behaviors | See connect.yaml |
 
-**Responsibilities:**
-- Coordinates all other services in the correct sequence
-- Determines tax behavior for the cart
-- Retrieves product categories
-- Groups line items by ship-from address
-- Creates Stripe tax calculation requests
-- Executes calculations in parallel (for multiple shipping methods)
-- Transforms results into commercetools update actions
+**Example Country Mapping:**
+```json
+{
+  "US": "exclusive",
+  "CA": "exclusive",
+  "DE": "inclusive",
+  "FR": "inclusive",
+  "GB": "inclusive"
+}
+```
 
-**Key Methods:**
-- `orchestrateTaxCalculation(cart)` - Main orchestration method
+### Tax Code Configuration
 
-### Tax Behavior Service
-**Purpose**: Determines whether taxes should be calculated as inclusive or exclusive.
+| Variable | Description |
+|----------|-------------|
+| `TAX_CODE_CATEGORY_MAPPING_JSON` | JSON mapping commercetools categories to Stripe tax codes |
+| `CUSTOM_TYPE_PRODUCT_KEY` | Custom type key for product tax codes (default: `connector-stripe-tax-product`) |
+| `CUSTOM_TYPE_CATEGORY_KEY` | Custom type key for category tax codes (default: `connector-stripe-tax-category`) |
+| `CUSTOM_TYPE_SHIPPING_KEY` | Custom type key for shipping tax codes (default: `connector-stripe-tax-shipping`) |
+| `CUSTOM_TYPE_CART_KEY` | Custom type key for cart references (default: `connector-stripe-tax-calculation-reference`) |
 
-**Responsibilities:**
-- Determines tax behavior at cart level (applied to all line items)
-- Implements priority-based fallback logic:
-  1. Country-specific mapping (highest priority)
-  2. Merchant-wide default
-  3. Stripe default (lowest priority)
-- Caches configuration to optimize performance
+### Ship-From Configuration
 
-**Key Methods:**
-- `determineTaxBehaviorForCart(cartRequest)` - Determines behavior for all line items
-- `determineCartTaxBehavior(cartContext)` - Determines behavior for cart
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SHIP_FROM_REQUIRED` | Require ship-from address | `true` |
+| `SHIP_FROM_DEFAULT_BUSINESS_COUNTRY` | Default country | - |
+| `SHIP_FROM_DEFAULT_BUSINESS_STATE` | Default state/province | - |
+| `SHIP_FROM_DEFAULT_BUSINESS_CITY` | Default city | - |
+| `SHIP_FROM_DEFAULT_BUSINESS_POSTAL_CODE` | Default postal code | - |
+| `SHIP_FROM_DEFAULT_BUSINESS_LINE1` | Default street address line 1 | - |
+| `SHIP_FROM_DEFAULT_BUSINESS_LINE2` | Default street address line 2 | - |
+| `SHIP_FROM_CHANNEL_PRIORITY` | Comma-separated channel IDs for priority selection | - |
 
-### Category Service
-**Purpose**: Retrieves product categories from commercetools API with intelligent caching.
+### Address Validation Configuration
 
-**Responsibilities:**
-- Fetches expanded categories with custom types from commercetools
-- Implements in-memory caching (5-minute TTL)
-- Supports partial cache hits (only fetches missing products)
-- Handles large product sets through batch processing (>500 products)
-- Executes batches concurrently for optimal performance
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY` | Default currency for Stripe verification | `usd` |
 
-**Key Methods:**
-- `getCategoriesForProducts(productIds, options)` - Retrieves categories for multiple products
+## Architecture
 
-### Tax Code Service
-**Purpose**: Resolves Stripe tax codes for products based on category configuration.
+### Service Components
 
-**Responsibilities:**
-- Checks category custom type fields for tax codes
-- Supports custom type-based tax code assignment
-- Caches shipping method data to avoid repeated API calls
-- Throws clear errors when tax codes are not found
+```mermaid
+flowchart TB
+    subgraph Services["tax-calculator/src/services"]
+        TO["tax-orchestrator.service.js<br/>Main orchestration"]
+        TB["tax-behavior.service.js<br/>Tax behavior determination"]
+        CS["category.service.js<br/>Category caching and retrieval"]
+        TC["tax-code.service.js<br/>Tax code resolution"]
+        SF["ship-from.service.js<br/>Ship-from address resolution"]
+        AS["address.service.js<br/>Address validation"]
+        UA["update-action.service.js<br/>commercetools action generation"]
+        EH["tax-error-handler.service.js<br/>Error handling"]
+    end
 
-**Key Methods:**
-- `getTaxCodeForProduct(cartLineItem, productCategories)` - Resolves tax code for a product
-- `getShippingTaxCodeFromShippingInfo(shippingInfo)` - Resolves tax code for shipping
+    TO --> TB
+    TO --> CS
+    TO --> TC
+    TO --> SF
+    TO --> AS
+    TO --> UA
+    TO --> EH
+```
 
-### Ship-From Service
-**Purpose**: Resolves ship-from addresses for line items using multiple fallback strategies.
+### Tax Orchestration Service
 
-**Responsibilities:**
-- Resolves ship-from addresses from line item supply channels
-- Falls back to inventory entry supply channels (dropshipping)
-- Uses default business address as final fallback
-- Groups line items by ship-from address for separate tax calculations
-- Caches channel data to optimize performance
+The `tax-orchestrator.service.js` coordinates two distinct flows depending on the cart state detected by the controller:
 
-**Key Methods:**
-- `resolveAllShipFromAddresses(lineItems)` - Resolves addresses for all line items
-- `resolveShipFromForLineItem(lineItem)` - Resolves address for a single line item
+#### Normal Path (6-Step Process)
 
-### Address Service
-**Purpose**: Validates shipping addresses using two-tier validation (local + Stripe).
+Triggered when `paymentInfo` is absent — a standard checkout tax calculation:
 
-**Responsibilities:**
-- Validates address structure and format
-- Performs country-specific validation (postal codes, state codes, required fields)
-- Verifies addresses with Stripe Tax API
-- Generates user-friendly error messages and suggestions
-- Provides actionable guidance for address corrections
+1. **Determine Tax Behavior**: Check country-specific mapping first, then merchant default, then Stripe default (null)
+2. **Fetch Product Categories**: Retrieve categories from commercetools with caching (5-min TTL)
+3. **Group Line Items by Ship-From**: Create unique address keys from country/state/city/postal_code
+4. **Create Stripe Requests**:
+   - **Single Mode**: One shipping method = single tax calculation request
+   - **Multiple Mode**: Multiple shipping methods = separate calculations per method with proportional distribution
+5. **Execute Tax Calculations**: Parallel execution with `Promise.allSettled`
+6. **Combine Results**: Merge results and create commercetools update actions
 
-**Key Methods:**
-- `validateAddress(address, requestId)` - Main validation method
+#### Re-apply Path (`reapplyExistingCalculation`)
+
+Triggered when the cart has `paymentInfo` but `taxedPrice` was cleared by a CT platform update (e.g. `setShippingAddress` after payment capture). In this case the normal path is blocked by the extension guard, so instead:
+
+1. Read `connectorStripeTax_calculationReferences[0]` from the cart's custom fields
+2. Retrieve the existing Stripe Tax calculation via `stripe.tax.calculations.retrieve()` (no new calculation created)
+3. Re-emit the same line item, shipping, and cart-total update actions from the retrieved calculation
+
+This keeps the PaymentIntent, cart, and order-syncer all referencing the same original `calculationId`.
+
+### Tax Code Resolution
+
+Tax codes are resolved via `tax-code.service.js`:
+
+1. **Custom Type Category Tax Codes**: the service scans the categories directly assigned to the
+   product and returns the first one whose custom field `connectorStripeTax_TaxCode` is set.
+2. **Error**: if no category carries a code, it throws `TaxCodeNotFoundError` and the whole cart
+   update fails. There is no default tax code — see
+   [ADR-006](../context/decisions/adr-006-tax-code-resolution-strategy.md).
+
+> **Only the category scan is active.** Three further strategies — product/line-item custom
+> fields, the `TAX_CODE_CATEGORY_MAPPING_JSON` mapping, and parent-category traversal — exist in
+> `tax-code.service.js` but are **commented out** (lines ~44-62). Earlier revisions of this README
+> advertised them as a live "5-strategy hierarchy"; they are not reachable. Re-enabling any of them
+> means uncommenting the branch and re-testing its supporting path
+> (`findFirstTaxCodeInHierarchy` / `taxCodeMappingConfig`). See
+> `context/business-rules/tax-code-resolution.md` Rule 2.
+
+**Caching:** 5-minute TTL cache for shipping method API calls
+
+### Tax Behavior Priority
+
+The tax behavior (inclusive/exclusive) is determined in this order:
+
+1. **Country Mapping**: If shipping country matches `TAX_BEHAVIOR_COUNTRY_MAPPING`
+2. **Merchant Default**: Falls back to `TAX_BEHAVIOR_DEFAULT`
+3. **Stripe Default**: If no behavior configured, Stripe uses its default
+
+### Ship-From Resolution Priority
+
+Ship-from address is resolved via `ship-from.service.js`:
+
+1. **Line Item Supply Channel** (highest priority): Uses commercetools Channel API to get address from channel definition
+2. **Inventory Entry Supply Channel** (for dropshipping): Queries Inventory API by SKU with intelligent channel selection:
+   - **Priority-based**: Respects `SHIP_FROM_CHANNEL_PRIORITY` comma-separated list
+   - **Stock-based**: Falls back to highest available quantity
+3. **Default Business Address**: Uses `SHIP_FROM_DEFAULT_BUSINESS_*` environment variables
+4. **Digital Products**: Returns null address if `SHIP_FROM_REQUIRED='false'`
+5. **Error**: Throws `ShipFromNotFoundError` if `SHIP_FROM_REQUIRED='true'` and no address found
+
+**Caching:** 5-minute TTL cache per channel ID
 
 ### Update Action Service
-**Purpose**: Transforms Stripe tax calculation results into commercetools update actions.
 
-**Responsibilities:**
-- Combines multiple calculations (for multiple shipping methods)
-- Creates cart custom type update actions
-- Creates line item tax update actions
-- Creates shipping tax update actions
-- Creates cart total tax action (for ExternalAmount mode)
-- Handles shipping key separation for multiple shipping modes
+The `update-action.service.js` (1,300+ lines) creates commercetools cart update actions:
 
-**Key Methods:**
-- `createCartUpdateActionsFromMultipleCalculations(calculations, shippingInfoGroups, requests, cart)` - Main transformation method
+**Major Capabilities:**
+- **Combine Multiple Calculations**: Merges results from separate Stripe requests
+- **Line Item Total Price Actions**: Sets base amounts for ExternalTotal mode
+- **Line Item Tax Amount Actions**: Sets tax breakdowns with effective tax rate calculation
+- **Shipping Method Tax Actions**: Creates per-shipping-method tax updates
+- **Cart Total Tax Action**: Sets overall cart tax (required for ExternalAmount mode)
+- **Cart Custom Type Action**: Stores calculation references and metadata
 
-### Tax Error Handler Service
-**Purpose**: Handles tax calculation errors and converts them to commercetools-compatible format.
+**Tax Breakdown Matching (3-Strategy Algorithm):**
+1. Match by calculated tax amount (percentage-based)
+2. Match by most common tax type
+3. Exact amount matching
 
-**Responsibilities:**
-- Handles tax code not found errors
-- Handles ship-from not found errors
-- Handles Stripe API errors
-- Maps Stripe error codes to user-friendly messages
-- Returns commercetools-compatible error format
+**Effective Tax Rate Calculation:** Combines rates from multiple calculations proportionally when same line item appears in multiple calculations
 
-**Key Methods:**
-- `handleTaxCalculationError(error, request, response, cartRequestBody)` - Main error handler
+## Custom Types
 
-## Environment Variables
+The module creates the following custom types during post-deploy:
 
-The tax calculator module supports the following environment variables. All variables listed in `connect.yaml` are available for configuration:
+| Custom Type | Applied To | Fields |
+|-------------|------------|--------|
+| `connector-stripe-tax-product` | `product-price`, `line-item` | `connectorStripeTax_TaxCode` (String) |
+| `connector-stripe-tax-category` | `category` | `connectorStripeTax_TaxCode` (String) |
+| `connector-stripe-tax-shipping` | `shipping-method` | `connectorStripeTax_TaxCode` (String) |
+| `connector-stripe-tax-calculation-reference` | `cart`, `order` | See below |
 
-### Required Variables
+**Cart/Order Custom Type Fields:**
+- `connectorStripeTax_calculationReferences` (Array of String) - Stripe calculation IDs
+- `connectorStripeTax_amountTotal` (Number) - Total amount including tax
+- `connectorStripeTax_taxAmountExclusive` (Number) - Exclusive tax amount
+- `connectorStripeTax_taxAmountInclusive` (Number) - Inclusive tax amount
+- `connectorStripeTax_currencies` (Array of String) - Currencies used
+- `connectorStripeTax_expiresAt` (Array of String) - Calculation expiration timestamps
+- `connectorStripeTax_calculationTimestamp` (DateTime) - When calculation was performed
 
-#### commercetools Configuration
-- **CTP_PROJECT_KEY**: commercetools project key
-- **CTP_CLIENT_ID**: commercetools API client ID
-- **CTP_CLIENT_SECRET**: commercetools API client secret
-- **CTP_SCOPE**: commercetools API client scope
-- **CTP_REGION**: commercetools project region
+## Error Handling
 
-#### Stripe Tax Configuration
-- **STRIPE_API_TOKEN**: Stripe API secret key for Stripe Tax
+The module handles errors via `tax-error-handler.service.js` and returns commercetools-compatible error responses:
 
-### Optional Variables
+### Custom Error Types
 
-#### Tax Behavior Configuration
-- **TAX_BEHAVIOR_DEFAULT**: Default tax behavior (`inclusive` or `exclusive`)
-- **TAX_BEHAVIOR_COUNTRY_MAPPING**: JSON string mapping countries to tax behaviors
+| Error Type | HTTP Status | Description |
+|------------|-------------|-------------|
+| `TaxCodeNotFoundError` | 400 | Product category has no tax code configured |
+| `TaxCodeShippingNotFoundError` | 400 | Shipping method has no tax code configured |
+| `ShipFromNotFoundError` | 400 | No ship-from address could be resolved |
+| Address Invalid | 400 | Shipping address failed validation |
+| Stripe API Error | 500 | Stripe Tax API returned an error |
 
-#### Tax Code Configuration
-- **TAX_CODE_CATEGORY_MAPPING_JSON**: JSON string mapping commercetools categories to Stripe tax codes
+### Stripe Error Code Mapping
 
-#### Ship-From Address Configuration
-- **SHIP_FROM_REQUIRED**: Require ship-from address (`true` or `false`, default: `false`)
-- **SHIP_FROM_DEFAULT_BUSINESS_COUNTRY**: Default business country
-- **SHIP_FROM_DEFAULT_BUSINESS_STATE**: Default business state/province
-- **SHIP_FROM_DEFAULT_BUSINESS_CITY**: Default business city
-- **SHIP_FROM_DEFAULT_BUSINESS_POSTAL_CODE**: Default business postal code
-- **SHIP_FROM_DEFAULT_BUSINESS_LINE1**: Default business street address line 1
-- **SHIP_FROM_DEFAULT_BUSINESS_LINE2**: Default business street address line 2
-- **SHIP_FROM_CHANNEL_PRIORITY**: Comma-separated channel IDs for priority-based selection
+The module maps Stripe error codes to actionable messages:
 
-#### Address Validation Configuration
-- **ADDRESS_VALIDATION_RATE_LIMIT**: Rate limit for address validation (requests per minute, default: `100`)
-- **ADDRESS_VALIDATION_WINDOW_MINUTES**: Time window for rate limit (minutes, default: `1`)
-- **ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY**: Default currency for Stripe verification (default: `usd`)
+| Stripe Error Code | Description | Recommended Action |
+|-------------------|-------------|-------------------|
+| `taxes_calculation_failed` | Unsupported country or missing tax rate | Check country support and tax registration |
+| `stripe_tax_inactive` | Tax not enabled in Stripe account | Enable Stripe Tax in dashboard |
+| `customer_tax_location_invalid` | Invalid address for tax location | Verify shipping address |
+| `shipping_address_invalid` | Invalid shipping address format | Check address fields |
 
-For complete configuration details, see [connect.yaml](../connect.yaml) in the root directory.
+### Address Validation Errors
+
+The `address.service.js` provides user-friendly guidance with:
+- Field-specific suggestions for validation errors
+- Postal code format examples per country (23 countries supported)
+- Country-currency mapping (USD, CAD, GBP, AUD, NZD, EUR defaults)
+
+## Development
+
+### Project Structure
+
+```
+tax-calculator/
+  src/
+    clients/          # commercetools API clients
+    config/           # Configuration utilities
+    connectors/       # Post-deploy and pre-undeploy scripts
+    constants/        # Application constants
+    controllers/      # Request handlers
+    errors/           # Custom error classes
+    middlewares/      # Express middlewares
+    routes/           # API routes
+    services/         # Business logic services
+    utils/            # Utility functions
+    validators/       # Input validation
+  test/
+    unit/             # Unit tests
+    integration/      # Integration tests
+```
+
+### Code Style
+
+- ESLint for linting: `npm run lint`
+- Prettier for formatting: `npm run prettier`
+- No emojis in source code (see project CLAUDE.md)
+
+## Additional Documentation
+
+For more detailed documentation, see:
+
+- [Root README](../README.md) - Project overview and architecture
+- [Configuration Guide](../context/ARCHITECTURE.md) - Detailed environment variable reference
+- [Deployment Guide](../context/deployment.md) - Step-by-step deployment instructions
+- [Tax Code Guide](../context/business-rules/tax-code-resolution.md) - Tax code configuration and mapping
+- [Troubleshooting Guide](../context/known-issues.md) - Common issues and solutions
+- [connect.yaml](../connect.yaml) - Complete deployment configuration

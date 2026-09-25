@@ -1,0 +1,911 @@
+{
+  "description": "Test cases for tax-calculator service to use in Postman",
+  "testCases": [
+    {
+      "name": "Case 1: Single Shipping Mode - With Supply Channel (ship_from from channel)",
+      "description": "Single shipping mode with line items that have supplyChannel for ship_from resolution",
+      "request": {
+        "resource": {
+          "obj": {
+            "id": "cart-single-supply-channel-001",
+            "country": "US",
+            "currency": "USD",
+            "key": "test-cart-single-supply-channel",
+            "locale": "en-US",
+            "lineItems": [
+              {
+                "id": "line-item-1",
+                "name": {
+                  "en-US": "Product 1"
+                },
+                "productId": "8dbc5b09-cdb8-4c0a-a136-918fb191aa92",
+                "variantId": 1,
+                "quantity": 1,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 5000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-ny",
+                  "typeId": "channel"
+                }
+              },
+              {
+                "id": "line-item-2",
+                "name": {
+                  "en-US": "Product 2"
+                },
+                "productId": "3193e8c3-94bf-43f9-918a-ed8a68bd2227",
+                "variantId": 1,
+                "quantity": 2,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 15000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-ny",
+                  "typeId": "channel"
+                }
+              }
+            ],
+            "totalPrice": {
+              "type": "centPrecision",
+              "currencyCode": "USD",
+              "centAmount": 20000,
+              "fractionDigits": 2
+            },
+            "shippingMode": "Single",
+            "shippingAddress": {
+              "country": "US",
+              "state": "CA",
+              "city": "Los Angeles",
+              "postalCode": "90001",
+              "streetName": "123 Main St"
+            },
+            "shippingInfo": {
+              "shippingMethod": {
+                "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                "typeId": "shipping-method"
+              },
+              "price": {
+                "type": "centPrecision",
+                "currencyCode": "USD",
+                "centAmount": 1000,
+                "fractionDigits": 2
+              }
+            },
+            "customLineItems": [],
+            "discountCodes": [],
+            "directDiscounts": [],
+            "inventoryMode": "ReserveOnOrder",
+            "taxMode": "ExternalAmount",
+            "taxRoundingMode": "HalfEven",
+            "taxCalculationMode": "LineItemLevel",
+            "deleteDaysAfterLastModification": 90,
+            "origin": "Customer"
+          }
+        }
+      }
+    },
+    {
+      "name": "Case 2: Single Shipping Mode - Default Business Address (no supplyChannel)",
+      "description": "Single shipping mode where ship_from falls back to default business address",
+      "request": {
+        "resource": {
+          "obj": {
+            "id": "cart-single-default-002",
+            "country": "DE",
+            "currency": "EUR",
+            "key": "test-cart-single-default",
+            "locale": "en-US",
+            "lineItems": [
+              {
+                "id": "line-item-1",
+                "name": {
+                  "en-US": "Product 1"
+                },
+                "productId": "8dbc5b09-cdb8-4c0a-a136-918fb191aa92",
+                "variantId": 1,
+                "quantity": 1,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "EUR",
+                  "centAmount": 34500,
+                  "fractionDigits": 2
+                }
+              },
+              {
+                "id": "line-item-2",
+                "name": {
+                  "en-US": "Product 2"
+                },
+                "productId": "3193e8c3-94bf-43f9-918a-ed8a68bd2227",
+                "variantId": 1,
+                "quantity": 2,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "EUR",
+                  "centAmount": 45000,
+                  "fractionDigits": 2
+                }
+              }
+            ],
+            "totalPrice": {
+              "type": "centPrecision",
+              "currencyCode": "EUR",
+              "centAmount": 79500,
+              "fractionDigits": 2
+            },
+            "shippingMode": "Single",
+            "shippingAddress": {
+              "country": "DE",
+              "city": "Berlin",
+              "postalCode": "10115",
+              "streetName": "Unter den Linden 1"
+            },
+            "shippingInfo": {
+              "shippingMethod": {
+                "id": "c9167f85-dfc4-443f-b44c-0ed835c27655",
+                "typeId": "shipping-method"
+              },
+              "price": {
+                "type": "centPrecision",
+                "currencyCode": "EUR",
+                "centAmount": 1500,
+                "fractionDigits": 2
+              }
+            },
+            "customLineItems": [],
+            "discountCodes": [],
+            "directDiscounts": [],
+            "inventoryMode": "ReserveOnOrder",
+            "taxMode": "ExternalAmount",
+            "taxRoundingMode": "HalfEven",
+            "taxCalculationMode": "LineItemLevel",
+            "deleteDaysAfterLastModification": 90,
+            "origin": "Customer"
+          }
+        }
+      }
+    },
+    {
+      "name": "Case 3: Single Shipping Mode - With Category Parent Hierarchy",
+      "description": "Single shipping mode with category that has parent, tax code should come from parent",
+      "request": {
+        "resource": {
+          "obj": {
+            "id": "cart-single-parent-category-003",
+            "country": "US",
+            "currency": "USD",
+            "key": "test-cart-single-parent",
+            "locale": "en-US",
+            "lineItems": [
+              {
+                "id": "line-item-1",
+                "name": {
+                  "en-US": "Product 1"
+                },
+                "productId": "8dbc5b09-cdb8-4c0a-a136-918fb191aa92",
+                "variantId": 1,
+                "quantity": 1,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 5000,
+                  "fractionDigits": 2
+                }
+              },
+              {
+                "id": "line-item-2",
+                "name": {
+                  "en-US": "Product 2"
+                },
+                "productId": "3193e8c3-94bf-43f9-918a-ed8a68bd2227",
+                "variantId": 1,
+                "quantity": 2,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 15000,
+                  "fractionDigits": 2
+                }
+              }
+            ],
+            "totalPrice": {
+              "type": "centPrecision",
+              "currencyCode": "USD",
+              "centAmount": 20000,
+              "fractionDigits": 2
+            },
+            "shippingMode": "Single",
+            "shippingAddress": {
+              "country": "US",
+              "state": "NY",
+              "city": "New York",
+              "postalCode": "10001",
+              "streetName": "456 Broadway"
+            },
+            "shippingInfo": {
+              "shippingMethod": {
+                "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                "typeId": "shipping-method"
+              },
+              "price": {
+                "type": "centPrecision",
+                "currencyCode": "USD",
+                "centAmount": 2000,
+                "fractionDigits": 2
+              }
+            },
+            "customLineItems": [],
+            "discountCodes": [],
+            "directDiscounts": [],
+            "inventoryMode": "ReserveOnOrder",
+            "taxMode": "ExternalAmount",
+            "taxRoundingMode": "HalfEven",
+            "taxCalculationMode": "LineItemLevel",
+            "deleteDaysAfterLastModification": 90,
+            "origin": "Customer"
+          }
+        }
+      }
+    },
+    {
+      "name": "Case 4: Multiple Shipping Mode - Different Ship From for Each Line Item",
+      "description": "Multiple shipping mode with different supplyChannels, each line item ships from different location",
+      "request": {
+        "resource": {
+          "obj": {
+            "id": "cart-multiple-different-shipfrom-004",
+            "country": "US",
+            "currency": "USD",
+            "key": "test-cart-multiple-different",
+            "locale": "en-US",
+            "lineItems": [
+              {
+                "id": "line-item-1",
+                "name": {
+                  "en-US": "Product 1"
+                },
+                "productId": "8dbc5b09-cdb8-4c0a-a136-918fb191aa92",
+                "variantId": 1,
+                "quantity": 1,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 5000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-ca",
+                  "typeId": "channel"
+                },
+                "shippingDetails": {
+                  "targets": [
+                    {
+                      "addressKey": "shipping-address-1",
+                      "quantity": 1,
+                      "shippingMethodKey": "shipping-key-1"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "line-item-2",
+                "name": {
+                  "en-US": "Product 2"
+                },
+                "productId": "3193e8c3-94bf-43f9-918a-ed8a68bd2227",
+                "variantId": 1,
+                "quantity": 2,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 15000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-ny",
+                  "typeId": "channel"
+                },
+                "shippingDetails": {
+                  "targets": [
+                    {
+                      "addressKey": "shipping-address-2",
+                      "quantity": 2,
+                      "shippingMethodKey": "shipping-key-2"
+                    }
+                  ]
+                }
+              }
+            ],
+            "totalPrice": {
+              "type": "centPrecision",
+              "currencyCode": "USD",
+              "centAmount": 20000,
+              "fractionDigits": 2
+            },
+            "shippingMode": "Multiple",
+            "shipping": [
+              {
+                "shippingKey": "shipping-key-1",
+                "shippingAddress": {
+                  "country": "US",
+                  "state": "CA",
+                  "city": "Los Angeles",
+                  "postalCode": "90001",
+                  "streetName": "123 Main St"
+                },
+                "shippingInfo": {
+                  "shippingMethod": {
+                    "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                    "typeId": "shipping-method"
+                  },
+                  "price": {
+                    "type": "centPrecision",
+                    "currencyCode": "USD",
+                    "centAmount": 1000,
+                    "fractionDigits": 2
+                  }
+                }
+              },
+              {
+                "shippingKey": "shipping-key-2",
+                "shippingAddress": {
+                  "country": "US",
+                  "state": "NY",
+                  "city": "New York",
+                  "postalCode": "10001",
+                  "streetName": "456 Broadway"
+                },
+                "shippingInfo": {
+                  "shippingMethod": {
+                    "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                    "typeId": "shipping-method"
+                  },
+                  "price": {
+                    "type": "centPrecision",
+                    "currencyCode": "USD",
+                    "centAmount": 2000,
+                    "fractionDigits": 2
+                  }
+                }
+              }
+            ],
+            "customLineItems": [],
+            "discountCodes": [],
+            "directDiscounts": [],
+            "inventoryMode": "ReserveOnOrder",
+            "taxMode": "ExternalAmount",
+            "taxRoundingMode": "HalfEven",
+            "taxCalculationMode": "LineItemLevel",
+            "deleteDaysAfterLastModification": 90,
+            "origin": "Customer"
+          }
+        }
+      }
+    },
+    {
+      "name": "Case 5: Multiple Shipping Mode - Same Ship From, Different Shipping Methods",
+      "description": "Multiple shipping mode where items ship from same location but use different shipping methods",
+      "request": {
+        "resource": {
+          "obj": {
+            "id": "cart-multiple-same-shipfrom-005",
+            "country": "US",
+            "currency": "USD",
+            "key": "test-cart-multiple-same",
+            "locale": "en-US",
+            "lineItems": [
+              {
+                "id": "line-item-1",
+                "name": {
+                  "en-US": "Product 1"
+                },
+                "productId": "8dbc5b09-cdb8-4c0a-a136-918fb191aa92",
+                "variantId": 1,
+                "quantity": 1,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 5000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-central",
+                  "typeId": "channel"
+                },
+                "shippingDetails": {
+                  "targets": [
+                    {
+                      "addressKey": "shipping-address-1",
+                      "quantity": 1,
+                      "shippingMethodKey": "shipping-key-standard"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "line-item-2",
+                "name": {
+                  "en-US": "Product 2"
+                },
+                "productId": "3193e8c3-94bf-43f9-918a-ed8a68bd2227",
+                "variantId": 1,
+                "quantity": 2,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 15000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-central",
+                  "typeId": "channel"
+                },
+                "shippingDetails": {
+                  "targets": [
+                    {
+                      "addressKey": "shipping-address-2",
+                      "quantity": 2,
+                      "shippingMethodKey": "shipping-key-express"
+                    }
+                  ]
+                }
+              }
+            ],
+            "totalPrice": {
+              "type": "centPrecision",
+              "currencyCode": "USD",
+              "centAmount": 20000,
+              "fractionDigits": 2
+            },
+            "shippingMode": "Multiple",
+            "shipping": [
+              {
+                "shippingKey": "shipping-key-standard",
+                "shippingAddress": {
+                  "country": "US",
+                  "state": "TX",
+                  "city": "Houston",
+                  "postalCode": "77001",
+                  "streetName": "789 Commerce St"
+                },
+                "shippingInfo": {
+                  "shippingMethod": {
+                    "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                    "typeId": "shipping-method"
+                  },
+                  "price": {
+                    "type": "centPrecision",
+                    "currencyCode": "USD",
+                    "centAmount": 1000,
+                    "fractionDigits": 2
+                  }
+                }
+              },
+              {
+                "shippingKey": "shipping-key-express",
+                "shippingAddress": {
+                  "country": "US",
+                  "state": "TX",
+                  "city": "Houston",
+                  "postalCode": "77001",
+                  "streetName": "789 Commerce St"
+                },
+                "shippingInfo": {
+                  "shippingMethod": {
+                    "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                    "typeId": "shipping-method"
+                  },
+                  "price": {
+                    "type": "centPrecision",
+                    "currencyCode": "USD",
+                    "centAmount": 2000,
+                    "fractionDigits": 2
+                  }
+                }
+              }
+            ],
+            "customLineItems": [],
+            "discountCodes": [],
+            "directDiscounts": [],
+            "inventoryMode": "ReserveOnOrder",
+            "taxMode": "ExternalAmount",
+            "taxRoundingMode": "HalfEven",
+            "taxCalculationMode": "LineItemLevel",
+            "deleteDaysAfterLastModification": 90,
+            "origin": "Customer"
+          }
+        }
+      }
+    },
+    {
+      "name": "Case 6: Multiple Shipping Mode - Line Item Split Across Shipping Methods",
+      "description": "Multiple shipping mode where one line item quantity is split across different shipping methods",
+      "request": {
+        "resource": {
+          "obj": {
+            "id": "cart-multiple-split-quantity-006",
+            "country": "US",
+            "currency": "USD",
+            "key": "test-cart-multiple-split",
+            "locale": "en-US",
+            "lineItems": [
+              {
+                "id": "line-item-1",
+                "name": {
+                  "en-US": "Product 1"
+                },
+                "productId": "8dbc5b09-cdb8-4c0a-a136-918fb191aa92",
+                "variantId": 1,
+                "quantity": 3,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 15000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-ny",
+                  "typeId": "channel"
+                },
+                "shippingDetails": {
+                  "targets": [
+                    {
+                      "addressKey": "shipping-address-1",
+                      "quantity": 1,
+                      "shippingMethodKey": "shipping-key-standard"
+                    },
+                    {
+                      "addressKey": "shipping-address-2",
+                      "quantity": 2,
+                      "shippingMethodKey": "shipping-key-express"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "line-item-2",
+                "name": {
+                  "en-US": "Product 2"
+                },
+                "productId": "3193e8c3-94bf-43f9-918a-ed8a68bd2227",
+                "variantId": 1,
+                "quantity": 2,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 15000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-ca",
+                  "typeId": "channel"
+                },
+                "shippingDetails": {
+                  "targets": [
+                    {
+                      "addressKey": "shipping-address-3",
+                      "quantity": 2,
+                      "shippingMethodKey": "shipping-key-standard"
+                    }
+                  ]
+                }
+              }
+            ],
+            "totalPrice": {
+              "type": "centPrecision",
+              "currencyCode": "USD",
+              "centAmount": 30000,
+              "fractionDigits": 2
+            },
+            "shippingMode": "Multiple",
+            "shipping": [
+              {
+                "shippingKey": "shipping-key-standard",
+                "shippingAddress": {
+                  "country": "US",
+                  "state": "NY",
+                  "city": "New York",
+                  "postalCode": "10001",
+                  "streetName": "456 Broadway"
+                },
+                "shippingInfo": {
+                  "shippingMethod": {
+                    "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                    "typeId": "shipping-method"
+                  },
+                  "price": {
+                    "type": "centPrecision",
+                    "currencyCode": "USD",
+                    "centAmount": 1000,
+                    "fractionDigits": 2
+                  }
+                }
+              },
+              {
+                "shippingKey": "shipping-key-express",
+                "shippingAddress": {
+                  "country": "US",
+                  "state": "NY",
+                  "city": "New York",
+                  "postalCode": "10001",
+                  "streetName": "456 Broadway"
+                },
+                "shippingInfo": {
+                  "shippingMethod": {
+                    "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                    "typeId": "shipping-method"
+                  },
+                  "price": {
+                    "type": "centPrecision",
+                    "currencyCode": "USD",
+                    "centAmount": 2000,
+                    "fractionDigits": 2
+                  }
+                }
+              }
+            ],
+            "customLineItems": [],
+            "discountCodes": [],
+            "directDiscounts": [],
+            "inventoryMode": "ReserveOnOrder",
+            "taxMode": "ExternalAmount",
+            "taxRoundingMode": "HalfEven",
+            "taxCalculationMode": "LineItemLevel",
+            "deleteDaysAfterLastModification": 90,
+            "origin": "Customer"
+          }
+        }
+      }
+    },
+    {
+      "name": "Case 7: Single Shipping Mode - International (EU to EU)",
+      "description": "Single shipping mode with international shipping (DE to FR)",
+      "request": {
+        "resource": {
+          "obj": {
+            "id": "cart-single-international-007",
+            "country": "FR",
+            "currency": "EUR",
+            "key": "test-cart-single-international",
+            "locale": "fr-FR",
+            "lineItems": [
+              {
+                "id": "line-item-1",
+                "name": {
+                  "en-US": "Product 1"
+                },
+                "productId": "8dbc5b09-cdb8-4c0a-a136-918fb191aa92",
+                "variantId": 1,
+                "quantity": 1,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "EUR",
+                  "centAmount": 34500,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-de",
+                  "typeId": "channel"
+                }
+              },
+              {
+                "id": "line-item-2",
+                "name": {
+                  "en-US": "Product 2"
+                },
+                "productId": "3193e8c3-94bf-43f9-918a-ed8a68bd2227",
+                "variantId": 1,
+                "quantity": 2,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "EUR",
+                  "centAmount": 45000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-de",
+                  "typeId": "channel"
+                }
+              }
+            ],
+            "totalPrice": {
+              "type": "centPrecision",
+              "currencyCode": "EUR",
+              "centAmount": 79500,
+              "fractionDigits": 2
+            },
+            "shippingMode": "Single",
+            "shippingAddress": {
+              "country": "FR",
+              "city": "Paris",
+              "postalCode": "75001",
+              "streetName": "1 Rue de Rivoli"
+            },
+            "shippingInfo": {
+              "shippingMethod": {
+                "id": "c9167f85-dfc4-443f-b44c-0ed835c27655",
+                "typeId": "shipping-method"
+              },
+              "price": {
+                "type": "centPrecision",
+                "currencyCode": "EUR",
+                "centAmount": 2500,
+                "fractionDigits": 2
+              }
+            },
+            "customLineItems": [],
+            "discountCodes": [],
+            "directDiscounts": [],
+            "inventoryMode": "ReserveOnOrder",
+            "taxMode": "ExternalAmount",
+            "taxRoundingMode": "HalfEven",
+            "taxCalculationMode": "LineItemLevel",
+            "deleteDaysAfterLastModification": 90,
+            "origin": "Customer"
+          }
+        }
+      }
+    },
+    {
+      "name": "Case 8: Multiple Shipping Mode - Mixed Ship From (Some with Channel, Some Default)",
+      "description": "Multiple shipping mode where some items have supplyChannel and others fall back to default",
+      "request": {
+        "resource": {
+          "obj": {
+            "id": "cart-multiple-mixed-shipfrom-008",
+            "country": "US",
+            "currency": "USD",
+            "key": "test-cart-multiple-mixed",
+            "locale": "en-US",
+            "lineItems": [
+              {
+                "id": "line-item-1",
+                "name": {
+                  "en-US": "Product 1"
+                },
+                "productId": "8dbc5b09-cdb8-4c0a-a136-918fb191aa92",
+                "variantId": 1,
+                "quantity": 1,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 5000,
+                  "fractionDigits": 2
+                },
+                "supplyChannel": {
+                  "id": "channel-warehouse-ny",
+                  "typeId": "channel"
+                },
+                "shippingDetails": {
+                  "targets": [
+                    {
+                      "addressKey": "shipping-address-1",
+                      "quantity": 1,
+                      "shippingMethodKey": "shipping-key-1"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "line-item-2",
+                "name": {
+                  "en-US": "Product 2"
+                },
+                "productId": "3193e8c3-94bf-43f9-918a-ed8a68bd2227",
+                "variantId": 1,
+                "quantity": 2,
+                "totalPrice": {
+                  "type": "centPrecision",
+                  "currencyCode": "USD",
+                  "centAmount": 15000,
+                  "fractionDigits": 2
+                },
+                "shippingDetails": {
+                  "targets": [
+                    {
+                      "addressKey": "shipping-address-2",
+                      "quantity": 2,
+                      "shippingMethodKey": "shipping-key-2"
+                    }
+                  ]
+                }
+              }
+            ],
+            "totalPrice": {
+              "type": "centPrecision",
+              "currencyCode": "USD",
+              "centAmount": 20000,
+              "fractionDigits": 2
+            },
+            "shippingMode": "Multiple",
+            "shipping": [
+              {
+                "shippingKey": "shipping-key-1",
+                "shippingAddress": {
+                  "country": "US",
+                  "state": "CA",
+                  "city": "Los Angeles",
+                  "postalCode": "90001",
+                  "streetName": "123 Main St"
+                },
+                "shippingInfo": {
+                  "shippingMethod": {
+                    "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                    "typeId": "shipping-method"
+                  },
+                  "price": {
+                    "type": "centPrecision",
+                    "currencyCode": "USD",
+                    "centAmount": 1000,
+                    "fractionDigits": 2
+                  }
+                }
+              },
+              {
+                "shippingKey": "shipping-key-2",
+                "shippingAddress": {
+                  "country": "US",
+                  "state": "FL",
+                  "city": "Miami",
+                  "postalCode": "33101",
+                  "streetName": "456 Ocean Drive"
+                },
+                "shippingInfo": {
+                  "shippingMethod": {
+                    "id": "281caa65-73ef-4164-9110-fb82768131cd",
+                    "typeId": "shipping-method"
+                  },
+                  "price": {
+                    "type": "centPrecision",
+                    "currencyCode": "USD",
+                    "centAmount": 2000,
+                    "fractionDigits": 2
+                  }
+                }
+              }
+            ],
+            "customLineItems": [],
+            "discountCodes": [],
+            "directDiscounts": [],
+            "inventoryMode": "ReserveOnOrder",
+            "taxMode": "ExternalAmount",
+            "taxRoundingMode": "HalfEven",
+            "taxCalculationMode": "LineItemLevel",
+            "deleteDaysAfterLastModification": 90,
+            "origin": "Customer"
+          }
+        }
+      }
+    }
+  ],
+  "taxCodesReference": {
+    "categories": {
+      "txcd_10101000": "General tangible personal property",
+      "txcd_10101001": "Electronics",
+      "txcd_10101002": "Books",
+      "txcd_10101003": "Clothing",
+      "txcd_10101004": "Food and beverages",
+      "txcd_10101005": "Furniture"
+    },
+    "shipping": {
+      "txcd_92010001": "Shipping and handling"
+    }
+  },
+  "notes": [
+    "Replace productIds with your actual product IDs from commercetools",
+    "Replace channel IDs with your actual channel IDs that have addresses configured",
+    "Categories are fetched by ID from commercetools, so they are not included in line items",
+    "Shipping methods are fetched by ID from commercetools, so custom fields are not included",
+    "For ship_from resolution, the service checks: 1) lineItem.supplyChannel, 2) inventory entry supplyChannel, 3) default business address",
+    "In Multiple mode, each shipping method gets its own Stripe tax calculation request",
+    "Line items can be split across shipping methods via shippingDetails.targets",
+    "Shipping method IDs: 281caa65-73ef-4164-9110-fb82768131cd (Express US Delivery), c9167f85-dfc4-443f-b44c-0ed835c27655 (Standard Delivery EU/UK)"
+  ]
+}

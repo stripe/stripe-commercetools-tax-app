@@ -15,7 +15,11 @@ export const CART_TAX_FIELD_NAMES = {
   TAX_AMOUNT_INCLUSIVE: 'connectorStripeTax_taxAmountInclusive',
   CURRENCIES: 'connectorStripeTax_currencies',
   EXPIRES_AT: 'connectorStripeTax_expiresAt',
-  CALCULATION_TIMESTAMP: 'connectorStripeTax_calculationTimestamp'
+  CALCULATION_TIMESTAMP: 'connectorStripeTax_calculationTimestamp',
+  // The destination the stored calculation was made for. A calculation may only be re-applied to
+  // a cart still delivering to that country; one stored without it predates SB3-218 and is
+  // recalculated instead of trusted.
+  DESTINATION_COUNTRY: 'connectorStripeTax_destinationCountry'
 };
 
 /**
@@ -195,6 +199,17 @@ export const CART_TAX_CUSTOM_TYPE = {
       "name": CART_TAX_FIELD_NAMES.CALCULATION_TIMESTAMP,
       "label": {
         "en": "Calculation Timestamp (ISO 8601)"
+      },
+      "type": {
+        "name": "String"
+      },
+      "required": false,
+      "inputHint": "SingleLine"
+    },
+    {
+      "name": CART_TAX_FIELD_NAMES.DESTINATION_COUNTRY,
+      "label": {
+        "en": "Tax Destination Country"
       },
       "type": {
         "name": "String"

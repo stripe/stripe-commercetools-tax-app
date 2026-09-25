@@ -210,7 +210,38 @@ describe('UpdateActionService', () => {
     });
   });
 
+  describe('summariseDestinations (SB3-218)', () => {
+    const requestTo = (country) => ({ customer_details: { address: { country } } });
+
+    it('records the destination a single-destination calculation was made for', () => {
+      expect(updateActionService.summariseDestinations([requestTo('ES')])).toBe('ES');
+    });
+
+    it('records every destination, sorted and deduplicated, for a multi-destination cart', () => {
+      const requests = [requestTo('ES'), requestTo('DE'), requestTo('ES')];
+      expect(updateActionService.summariseDestinations(requests)).toBe('DE,ES');
+    });
+
+    it('returns an empty record rather than inventing one when no country is known', () => {
+      // An empty record is what makes a stored calculation un-replayable. It must never be
+      // filled in from somewhere else — that is how the cart would silently keep a calculation
+      // made against a destination nobody verified.
+      expect(updateActionService.summariseDestinations([])).toBe('');
+      expect(updateActionService.summariseDestinations([{}])).toBe('');
+      expect(updateActionService.summariseDestinations()).toBe('');
+    });
+  });
+
   describe('createCartCustomTypeUpdateAction', () => {
+    it('stores the destination alongside the calculation', () => {
+      const result = updateActionService.createCartCustomTypeUpdateAction(
+        { calculation_references: ['calc_1'] },
+        [{ customer_details: { address: { country: 'ES' } } }]
+      );
+
+      expect(result.fields[CART_TAX_FIELD_NAMES.DESTINATION_COUNTRY]).toBe('ES');
+    });
+
     it('should create custom type update action with all fields', () => {
       const calculation = {
         calculation_references: ['calc_123'],
@@ -1449,6 +1480,82 @@ describe('UpdateActionService', () => {
       );
 
       expect(result.externalTaxAmount.taxRate.country).toBe('US');
+    });
+  });
+
+  describe('zero-tax labels name the destination, not cart.country (SB3-218)', () => {
+    // These were the last three places in this service that produced a country without consulting
+    // the calculation. Every one of them carries amount 0, so a wrong country never moved money —
+    // but it recorded a jurisdiction the order was never bound for, from a field the shopper
+    // controls. See destinationCountryOf.
+    const calculationDeliveredToSpain = {
+      id: 'calc_es',
+      currency: 'eur',
+      line_items: {
+        data: [{ reference: 'line-item-1', amount: 10000, amount_tax: 0 }]
+      },
+      tax_breakdown: [],
+      customer_details: { address: { country: 'ES' } }
+    };
+    const cartPricedInTheUS = {
+      country: 'US',
+      shippingAddress: { country: 'US' },
+      totalPrice: { currencyCode: 'EUR' }
+    };
+
+    it('labels a line item that came back without a breakdown with the calculation destination', () => {
+      const [action] = updateActionService.createLineItemActionsFromCalculation(
+        calculationDeliveredToSpain,
+        null
+      );
+
+      expect(action.externalTaxAmount.taxRate.amount).toBe(0);
+      expect(action.externalTaxAmount.taxRate.country).toBe('ES');
+    });
+
+    it('labels a zero-tax shipping action with the calculation destination', () => {
+      const action = updateActionService.createZeroTaxShippingAction(
+        'shipping-key-1',
+        calculationDeliveredToSpain,
+        cartPricedInTheUS,
+        500
+      );
+
+      expect(action.externalTaxAmount.taxRate.amount).toBe(0);
+      expect(action.externalTaxAmount.taxRate.country).toBe('ES');
+    });
+
+    it('labels a line item that got no calculation at all with the destination of the ones that ran', () => {
+      const lineItemTotalPriceActions = [
+        {
+          action: 'setLineItemTotalPrice',
+          lineItemId: 'line-item-2',
+          shippingKey: 'shipping-key-1',
+          externalTotalPrice: { totalPrice: { currencyCode: 'EUR', centAmount: 1000 } }
+        }
+      ];
+
+      const actions = updateActionService.createLineItemTaxUpdateActions(
+        [calculationDeliveredToSpain],
+        [],
+        lineItemTotalPriceActions,
+        cartPricedInTheUS
+      );
+
+      const missing = actions.find(action => action.lineItemId === 'line-item-2');
+      expect(missing.externalTaxAmount.taxRate.amount).toBe(0);
+      expect(missing.externalTaxAmount.taxRate.country).toBe('ES');
+    });
+
+    it('falls back to the documented default rather than to cart.country when nothing names a destination', () => {
+      const action = updateActionService.createZeroTaxShippingAction(
+        'shipping-key-1',
+        { currency: 'usd', tax_breakdown: [] },
+        { country: 'ES', totalPrice: { currencyCode: 'USD' } },
+        500
+      );
+
+      expect(action.externalTaxAmount.taxRate.country).toBe('US');
     });
   });
 
