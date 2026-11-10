@@ -21,11 +21,12 @@ The connector enables real-time tax calculation during checkout and synchronizes
 ### Tax Calculator Module
 - **Real-time Tax Calculation**: Automatic tax calculation when carts are created/updated via API Extensions
 - **Address Validation**: Two-tier validation (local rules + Stripe verification) for shipping addresses with country-specific postal code formats for 23 supported countries
-- **Tax Code Resolution**: 5-strategy hierarchical lookup (custom type category, custom field product, environment mapping, parent category traversal up to 10 levels, error fallback)
+- **Tax Code Resolution**: Resolves the Stripe tax code from the product category's custom field; a line item with no resolvable tax code fails the cart update
 - **Ship-From Address Resolution**: Multi-strategy resolution (line item supply channel, inventory entry channel with priority/stock-based selection, default business address)
 - **Tax Behavior Configuration**: Configurable inclusive/exclusive tax behavior by country mapping or merchant default
 - **Multiple Shipping Support**: Handles both Single and Multiple shipping modes with parallel tax calculations and proportional line item distribution
 - **Multi-Warehouse Support**: Groups line items by ship-from address for accurate tax jurisdiction calculations
+- **Stored Calculation Re-apply**: When a cart's taxed price is cleared after a payment is attached, re-applies the existing Stripe Tax calculation by id — keeping the PaymentIntent and the stored calculation reference — instead of creating a new one, as long as the cart still delivers to the same tax jurisdiction (country, state, city and postal code); any other case is handled as a fresh calculation
 - **Category Caching**: In-memory cache for product categories (5-minute TTL) to optimize performance
 - **Batch Processing**: Efficient handling of large product catalogs (>500 products) with max 5 concurrent batch requests
 - **Shipping Tax Code Lookup**: Retrieves tax codes from Stripe custom field on commercetools shipping methods
@@ -38,6 +39,8 @@ The connector enables real-time tax calculation during checkout and synchronizes
 - **Event-Driven Architecture**: Uses Google Cloud Pub/Sub for reliable order processing
 - **Idempotent Processing**: Detects existing transactions using regex extraction from Stripe error messages to avoid duplicates
 - **Multi-Calculation Support**: Handles orders with multiple tax calculations (from multiple shipping methods)
+- **Calculation Reference Binding**: Binds each stored calculation reference to its order before filing, de-duplicating references and scoping each to its own shipment, so every reference is filed exactly once
+- **Transient Error Redelivery**: Redelivers on transient Stripe errors, so an order sync is retried rather than lost on a temporary failure
 - **PaymentIntent Integration**: Updates Stripe PaymentIntent metadata with comma-separated transaction IDs for reconciliation
 
 ## Technologies Used
@@ -325,9 +328,7 @@ For detailed configuration documentation, see:
 
 ### Documentation
 - [Configuration Guide](context/ARCHITECTURE.md) - Detailed environment variable and setup reference
-- [Deployment Guide](context/deployment.md) - Step-by-step deployment instructions
 - [Tax Code Guide](context/business-rules/tax-code-resolution.md) - Tax code configuration and mapping
-- [Troubleshooting Guide](context/known-issues.md) - Common issues and solutions
 
 ### Module Documentation
 - [Tax Calculator Documentation](tax-calculator/README.md) - Complete guide for tax calculator module
@@ -337,4 +338,4 @@ For detailed configuration documentation, see:
 We have provided comprehensive unit and integration test cases with [Jest](https://jestjs.io/) and [supertest](https://github.com/ladjs/supertest#readme). The implementation is under `test` folder in both `tax-calculator` and `order-syncer` modules. It is recommended to implement additional test cases based on your specific needs.
 
 ### Support
-For issues, questions, or contributions, please refer to the project repository or contact the development team. 
+For issues, questions, or contributions, please refer to the project repository or contact the development team.

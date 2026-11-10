@@ -16,6 +16,18 @@ function getStripeClient() {
 }
 
 /**
+ * Retrieve a Stripe Tax calculation with its line items, to verify a reference belongs to this
+ * order before filing it (SB3-238 AC-5, ADR-012).
+ * @param {string} calculationReference - The calculation reference.
+ * @returns {Promise<object>} The Stripe Tax calculation (with line_items expanded).
+ */
+export async function retrieveCalculation(calculationReference) {
+  return getStripeClient().tax.calculations.retrieve(calculationReference, {
+    expand: ['line_items']
+  });
+}
+
+/**
  * Get tax transaction ID from Tax Calculation.
  * @param {string} calculationReference - The calculation reference.
  * @param {string} orderId - The order ID.
@@ -35,8 +47,23 @@ export async function getTransactionFromTaxCalculation(calculationReference, ord
       }
     });
   } catch (error) {
-    transaction.id = error.message.match(/tax transaction (tax_\w+)/)?.[1];
-    
+    // An "already exists" error names a transaction that was filed before. Only adopt it if it
+    // belongs to THIS order (metadata.ct_order_id) — otherwise this order would link to another
+    // order's transaction, which is exactly what a forged reference would cause (SB3-238).
+    const existingId = error.message.match(/tax transaction (tax_\w+)/)?.[1];
+    if (existingId) {
+      try {
+        const existing = await getStripeClient().tax.transactions.retrieve(existingId);
+        if (existing?.metadata?.ct_order_id === orderId) {
+          transaction.id = existingId;
+        } else {
+          logger.error(`Tax transaction ${existingId} for calculation ${calculationReference} belongs to order ${existing?.metadata?.ct_order_id}, not ${orderId}; not adopting it.`);
+        }
+      } catch (retrieveError) {
+        logger.warn(`Could not verify existing transaction ${existingId}: ${retrieveError.message}`);
+      }
+    }
+
     if (error.code !== 'resource_missing' && error.statusCode !== 404) {
       logger.warn(`Error retrieving Tax Transaction: ${error.message}`);
     }

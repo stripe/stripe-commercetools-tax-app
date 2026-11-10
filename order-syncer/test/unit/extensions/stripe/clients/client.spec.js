@@ -1,8 +1,9 @@
 import { expect, describe, it, jest, beforeEach, afterEach } from '@jest/globals';
-import { 
-  createTaxTransactions, 
+import {
+  createTaxTransactions,
   getTransactionFromTaxCalculation,
-  updatePaymentIntentMetadata 
+  updatePaymentIntentMetadata,
+  retrieveCalculation
 } from '../../../../../src/extensions/stripe/clients/client.js';
 
 // Mock Stripe
@@ -10,6 +11,10 @@ const mockStripeClient = {
   tax: {
     transactions: {
       createFromCalculation: jest.fn(),
+      retrieve: jest.fn(),
+    },
+    calculations: {
+      retrieve: jest.fn(),
     },
   },
   paymentIntents: {
@@ -147,7 +152,7 @@ describe('stripe-client.spec', () => {
       expect(result).toEqual(mockTransaction);
     });
 
-    it('should extract transaction ID from error message when transaction already exists', async () => {
+    it('should adopt an already-existing transaction only when it belongs to this order', async () => {
       const calculationReference = 'calc_123';
       const orderId = 'order-123';
       const paymentIntentId = 'pi_123';
@@ -155,10 +160,37 @@ describe('stripe-client.spec', () => {
       const stripeError = new Error('A tax transaction tax_ABC123 already exists for this calculation');
       stripeError.code = 'resource_already_exists';
       mockStripeClient.tax.transactions.createFromCalculation.mockRejectedValue(stripeError);
+      // The existing transaction was filed for THIS order → safe to adopt.
+      mockStripeClient.tax.transactions.retrieve.mockResolvedValue({
+        id: 'tax_ABC123',
+        metadata: { ct_order_id: orderId },
+      });
 
       const result = await getTransactionFromTaxCalculation(calculationReference, orderId, paymentIntentId);
 
+      expect(mockStripeClient.tax.transactions.retrieve).toHaveBeenCalledWith('tax_ABC123');
       expect(result.id).toBe('tax_ABC123');
+    });
+
+    it('should NOT adopt an already-existing transaction that belongs to another order (SB3-238)', async () => {
+      const { logger } = await import('../../../../../src/utils/logger.util.js');
+      const calculationReference = 'calc_123';
+      const orderId = 'order-123';
+      const paymentIntentId = 'pi_123';
+
+      const stripeError = new Error('A tax transaction tax_ABC123 already exists for this calculation');
+      stripeError.code = 'resource_already_exists';
+      mockStripeClient.tax.transactions.createFromCalculation.mockRejectedValue(stripeError);
+      // The existing transaction was filed for a DIFFERENT order → must not be adopted.
+      mockStripeClient.tax.transactions.retrieve.mockResolvedValue({
+        id: 'tax_ABC123',
+        metadata: { ct_order_id: 'some-other-order' },
+      });
+
+      const result = await getTransactionFromTaxCalculation(calculationReference, orderId, paymentIntentId);
+
+      expect(result.id).toBeUndefined();
+      expect(logger.error).toHaveBeenCalled();
     });
 
     it('should return empty object when error occurs without transaction ID', async () => {
@@ -173,6 +205,21 @@ describe('stripe-client.spec', () => {
       const result = await getTransactionFromTaxCalculation(calculationReference, orderId, paymentIntentId);
 
       expect(result.id).toBeUndefined();
+    });
+  });
+
+  describe('retrieveCalculation', () => {
+    it('should retrieve the calculation with its line items expanded', async () => {
+      const calculationReference = 'calc_123';
+      const mockCalculation = { id: calculationReference, line_items: { data: [] } };
+      mockStripeClient.tax.calculations.retrieve.mockResolvedValue(mockCalculation);
+
+      const result = await retrieveCalculation(calculationReference);
+
+      expect(mockStripeClient.tax.calculations.retrieve).toHaveBeenCalledWith(calculationReference, {
+        expand: ['line_items'],
+      });
+      expect(result).toEqual(mockCalculation);
     });
   });
 

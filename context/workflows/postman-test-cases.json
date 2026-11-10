@@ -174,7 +174,7 @@
     },
     {
       "name": "Case 3: Single Shipping Mode - With Category Parent Hierarchy",
-      "description": "Single shipping mode with category that has parent, tax code should come from parent",
+      "description": "Single shipping mode with a product whose category has a parent. The tax code is read only from the product's own categories.",
       "request": {
         "resource": {
           "obj": {

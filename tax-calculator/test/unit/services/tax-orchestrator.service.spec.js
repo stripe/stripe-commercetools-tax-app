@@ -259,10 +259,16 @@ describe('TaxOrchestratorService', () => {
   });
 
   describe('reapplyExistingCalculation', () => {
-    // A cart whose stored calculation still belongs to where it delivers: it carries a delivery
-    // address and the destination that calculation was made for. Re-apply is only reachable in
-    // that state — a calculation recorded against a different destination, or against none at
-    // all (everything stored before SB3-218), is recalculated instead.
+    // A cart whose stored calculation still belongs to where it delivers. Since SB3-238 (ADR-012)
+    // "where it delivers" is read from the retrieved calculation's own customer_details.address,
+    // at jurisdiction granularity — not from the cart custom field — so the stored calculation
+    // mocked here carries the matching address. A calculation made for a different destination, or
+    // one Stripe reports as no longer existing (resource_missing/404), is recalculated instead; any
+    // other retrieve error is re-thrown.
+    // The echoed shape of a retrieved calculation's address: Stripe returns every subfield, null
+    // when empty (here the cart captured no state). The cart side omits state (undefined), so this
+    // also guards the null-vs-undefined normalization in createAddressKey (SB3-238 F1).
+    const NYC_ADDRESS = { country: 'US', state: null, city: 'New York', postal_code: '10001' };
     const makeCart = (overrides = {}) => ({
       id: 'cart-reapply-1',
       shippingMode: 'Single',
@@ -282,7 +288,8 @@ describe('TaxOrchestratorService', () => {
         id: 'taxcalc_abc123',
         amount_total: 3264,
         currency: 'usd',
-        line_items: { data: [{ reference: 'li-1', amount: 1998, amount_tax: 177 }] },
+        customer_details: { address: NYC_ADDRESS },
+        line_items: { data: [{ reference: 'li-1', amount: 1998, amount_tax: 177, metadata: { cartId: 'cart-reapply-1' } }] },
         tax_breakdown: []
       };
       const mockLineItemActions = [{ action: 'setLineItemTaxAmount', lineItemId: 'li-1' }];
@@ -294,7 +301,7 @@ describe('TaxOrchestratorService', () => {
 
       const result = await taxOrchestratorService.reapplyExistingCalculation(makeCart());
 
-      expect(mockStripeClient.tax.calculations.retrieve).toHaveBeenCalledWith('taxcalc_abc123', { expand: ['line_items'] });
+      expect(mockStripeClient.tax.calculations.retrieve).toHaveBeenCalledWith('taxcalc_abc123', { expand: ['line_items'] }, { timeout: 1500, maxNetworkRetries: 0 });
       // The cart is deliberately not passed: the country labelling a zero-tax line item is read
       // from the calculation, never from cart.country (SB3-218, ADR-007).
       expect(updateActionService.createLineItemActionsFromCalculation).toHaveBeenCalledWith(mockCalculation, null);
@@ -303,7 +310,7 @@ describe('TaxOrchestratorService', () => {
     });
 
     it('should omit cart total action when createCartTotalTaxAction returns null', async () => {
-      const mockCalculation = { id: 'taxcalc_abc123', amount_total: 0, currency: 'usd', line_items: { data: [] } };
+      const mockCalculation = { id: 'taxcalc_abc123', amount_total: 0, currency: 'usd', customer_details: { address: NYC_ADDRESS }, line_items: { data: [{ reference: 'li-1', amount: 0, amount_tax: 0, metadata: { cartId: 'cart-reapply-1' } }] } };
       const mockLineItemActions = [];
 
       mockStripeClient.tax.calculations.retrieve.mockResolvedValue(mockCalculation);
@@ -315,20 +322,33 @@ describe('TaxOrchestratorService', () => {
       expect(result).toEqual({ actions: [] });
     });
 
-    it('should throw and log error when Stripe retrieve fails', async () => {
-      const stripeError = new Error('Stripe API error');
-      mockStripeClient.tax.calculations.retrieve.mockRejectedValue(stripeError);
+    it('recalculates when the stored calculation is genuinely missing, but surfaces other errors', async () => {
+      // Pre-SB3-238 this re-raised every retrieve error and refused the cart. Now a calculation
+      // Stripe reports as gone is recalculated (ADR-012); a transient error still surfaces (C4).
+      const gone = Object.assign(new Error('No such Tax Calculation'), { code: 'resource_missing', statusCode: 404 });
+      mockStripeClient.tax.calculations.retrieve.mockRejectedValue(gone);
+      const orchestrate = jest.spyOn(taxOrchestratorService, 'orchestrateTaxCalculation')
+        .mockResolvedValue({ actions: [] });
 
-      await expect(taxOrchestratorService.reapplyExistingCalculation(makeCart())).rejects.toThrow('Stripe API error');
-      expect(logger.error).toHaveBeenCalledWith('Tax re-apply failed', expect.objectContaining({
-        cartId: 'cart-reapply-1',
-        calculationId: 'taxcalc_abc123'
-      }));
+      await taxOrchestratorService.reapplyExistingCalculation(makeCart());
+
+      expect(orchestrate).toHaveBeenCalledWith(expect.objectContaining({ id: 'cart-reapply-1' }));
+      expect(logger.warn).toHaveBeenCalledWith(
+        'The stored calculation no longer exists — recalculating',
+        expect.objectContaining({ cartId: 'cart-reapply-1', calculationId: 'taxcalc_abc123' })
+      );
+
+      orchestrate.mockClear();
+      const transient = Object.assign(new Error('connection error'), { type: 'StripeConnectionError', statusCode: 500 });
+      mockStripeClient.tax.calculations.retrieve.mockRejectedValue(transient);
+
+      await expect(taxOrchestratorService.reapplyExistingCalculation(makeCart())).rejects.toThrow('connection error');
+      expect(orchestrate).not.toHaveBeenCalled();
     });
 
     it('should not call orchestrateTaxCalculation or createCartUpdateActionsFromMultipleCalculations', async () => {
       mockStripeClient.tax.calculations.retrieve.mockResolvedValue({
-        id: 'taxcalc_abc123', amount_total: 1000, currency: 'usd', line_items: { data: [] }
+        id: 'taxcalc_abc123', amount_total: 1000, currency: 'usd', customer_details: { address: NYC_ADDRESS }, line_items: { data: [{ reference: 'li-1', amount: 1000, amount_tax: 0, metadata: { cartId: 'cart-reapply-1' } }] }
       });
       updateActionService.createLineItemActionsFromCalculation.mockReturnValue([]);
       updateActionService.createCartTotalTaxAction.mockReturnValue({ action: 'setCartTotalTax' });
@@ -347,7 +367,8 @@ describe('TaxOrchestratorService', () => {
       });
       const mockCalculation = {
         id: 'taxcalc_abc123', amount_total: 6800, currency: 'usd',
-        line_items: { data: [{ reference: 'li-1', amount: 3800, amount_tax: 302 }] },
+        customer_details: { address: NYC_ADDRESS },
+        line_items: { data: [{ reference: 'li-1', amount: 3800, amount_tax: 302, metadata: { cartId: 'cart-reapply-1' } }] },
         shipping_cost: { amount: 3000, amount_tax: 0 }
       };
       const mockLineItemActions = [{ action: 'setLineItemTaxAmount', lineItemId: 'li-1' }];
@@ -365,28 +386,27 @@ describe('TaxOrchestratorService', () => {
       expect(result.actions).toEqual([...mockLineItemActions, mockShippingAction, mockCartTotalAction]);
     });
 
-    it('should not include shipping tax action when shippingMode is Multiple', async () => {
+    it('recalculates a Multiple-shipping cart instead of re-applying a single stored calculation', async () => {
+      // Re-apply restores only the first reference, so a Multiple-shipping cart cannot be covered
+      // safely and is recalculated (ADR-008/ADR-012) — short-circuiting before any retrieve.
       const cart = makeCart({
         shippingMode: 'Multiple',
         shipping: [{ shippingKey: 'ship-1' }]
       });
-      const mockCalculation = {
-        id: 'taxcalc_abc123', amount_total: 1000, currency: 'usd', line_items: { data: [] }
-      };
-
-      mockStripeClient.tax.calculations.retrieve.mockResolvedValue(mockCalculation);
-      updateActionService.createLineItemActionsFromCalculation.mockReturnValue([]);
-      updateActionService.createCartTotalTaxAction.mockReturnValue({ action: 'setCartTotalTax' });
+      const orchestrate = jest.spyOn(taxOrchestratorService, 'orchestrateTaxCalculation')
+        .mockResolvedValue({ actions: [] });
 
       await taxOrchestratorService.reapplyExistingCalculation(cart);
 
+      expect(mockStripeClient.tax.calculations.retrieve).not.toHaveBeenCalled();
+      expect(orchestrate).toHaveBeenCalledWith(cart);
       expect(updateActionService.createShippingTaxUpdateAction).not.toHaveBeenCalled();
     });
 
     it('should not include shipping tax action when shippingInfo is null', async () => {
       const cart = makeCart({ shippingMode: 'Single', shippingInfo: null });
       const mockCalculation = {
-        id: 'taxcalc_abc123', amount_total: 1000, currency: 'usd', line_items: { data: [] }
+        id: 'taxcalc_abc123', amount_total: 1000, currency: 'usd', customer_details: { address: NYC_ADDRESS }, line_items: { data: [{ reference: 'li-1', amount: 1000, amount_tax: 0, metadata: { cartId: 'cart-reapply-1' } }] }
       };
 
       mockStripeClient.tax.calculations.retrieve.mockResolvedValue(mockCalculation);
@@ -648,7 +668,7 @@ describe('TaxOrchestratorService', () => {
   });
 
   describe('createAddressKey', () => {
-    it('should create unique key from address', () => {
+    it('creates a normalised (trim + upper-case) key from an address', () => {
       const address = {
         country: 'US',
         state: 'CA',
@@ -661,9 +681,36 @@ describe('TaxOrchestratorService', () => {
       expect(key).toBe(JSON.stringify({
         country: 'US',
         state: 'CA',
-        city: 'San Francisco',
+        city: 'SAN FRANCISCO',
         postal_code: '94102'
       }));
+    });
+
+    it('collapses cosmetic case/whitespace differences so the two sources key identically', () => {
+      // Stripe may canonicalise its echoed customer_details.address differently from the raw
+      // commercetools address; a cosmetic difference must not cause a false re-apply mismatch
+      // (which would mint an extra billable calculation). (SB3-238 review.)
+      const stripeEchoed = { country: 'us', state: 'ca', city: 'San Francisco ', postal_code: '94102' };
+      const cartRaw = { country: 'US', state: 'CA', city: 'SAN FRANCISCO', postal_code: ' 94102' };
+
+      expect(taxOrchestratorService.createAddressKey(stripeEchoed))
+        .toBe(taxOrchestratorService.createAddressKey(cartRaw));
+    });
+
+    it('collapses internal whitespace in the postal code, but keeps it in the city', () => {
+      // A UK/CA postcode differs by internal spacing between sources; the city does not.
+      const spaced = { country: 'GB', city: 'London', postal_code: 'SW1A 1AA' };
+      const tight = { country: 'GB', city: 'London', postal_code: 'SW1A1AA' };
+      expect(taxOrchestratorService.createAddressKey(spaced))
+        .toBe(taxOrchestratorService.createAddressKey(tight));
+
+      // Two genuinely different postcodes still key apart — the collapse only merges whitespace variants.
+      expect(taxOrchestratorService.createAddressKey({ country: 'GB', city: 'London', postal_code: 'SW1A 1AA' }))
+        .not.toBe(taxOrchestratorService.createAddressKey({ country: 'GB', city: 'London', postal_code: 'EC1A 1BB' }));
+
+      // City internal space is meaningful and preserved.
+      expect(taxOrchestratorService.createAddressKey({ country: 'US', city: 'New York' }))
+        .not.toBe(taxOrchestratorService.createAddressKey({ country: 'US', city: 'NewYork' }));
     });
 
     it('should return "no_ship_from" for null address', () => {

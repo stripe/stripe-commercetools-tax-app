@@ -16,7 +16,7 @@ This module calculates sales tax for cart line items and shipping by:
 
 - **Real-time Tax Calculation**: Automatic tax calculation when carts are created/updated
 - **Address Validation**: Two-tier validation (local rules + Stripe verification) with 23 country-specific formats
-- **Tax Code Resolution**: 5-strategy hierarchical lookup with parent category traversal (max depth 10)
+- **Tax Code Resolution**: Resolves tax codes from product category custom fields
 - **Ship-From Resolution**: Multi-strategy address resolution (line item supply channel, inventory entry channel, default)
 - **Tax Behavior Configuration**: Configurable inclusive/exclusive tax by country mapping or merchant default
 - **Multiple Shipping Support**: Handles Single and Multiple shipping modes with proportional line item distribution
@@ -272,11 +272,13 @@ Triggered when `paymentInfo` is absent — a standard checkout tax calculation:
 
 Triggered when the cart has `paymentInfo` but `taxedPrice` was cleared by a CT platform update (e.g. `setShippingAddress` after payment capture). In this case the normal path is blocked by the extension guard, so instead:
 
-1. Read `connectorStripeTax_calculationReferences[0]` from the cart's custom fields
-2. Retrieve the existing Stripe Tax calculation via `stripe.tax.calculations.retrieve()` (no new calculation created)
-3. Re-emit the same line item, shipping, and cart-total update actions from the retrieved calculation
+1. Read `connectorStripeTax_calculationReferences[0]` from the cart's custom fields.
+2. If the cart is in **Multiple** shipping mode, recalculate (`orchestrateTaxCalculation`) — a Multiple-mode cart is not re-applied.
+3. Otherwise retrieve the existing Stripe Tax calculation via `stripe.tax.calculations.retrieve()` **first**. If Stripe reports it as missing (`resource_missing` / 404), recalculate.
+4. Compare the **retrieved calculation's own delivery address** (`customer_details.address`) against the cart's current delivery address at jurisdiction granularity (country + state + city + postal code, via `createAddressKey()`). If they differ, recalculate.
+5. Only when the cart is Single-mode and the jurisdiction still matches is the stored calculation re-applied — re-emitting the same line item, shipping, and cart-total update actions with **no new calculation created**.
 
-This keeps the PaymentIntent, cart, and order-syncer all referencing the same original `calculationId`.
+Re-applying keeps the PaymentIntent, cart, and order-syncer all referencing the same original `calculationId`. A new calculation is created in the three recalculation cases above (Multiple mode, a missing stored calculation, or a changed jurisdiction).
 
 ### Tax Code Resolution
 
@@ -285,16 +287,7 @@ Tax codes are resolved via `tax-code.service.js`:
 1. **Custom Type Category Tax Codes**: the service scans the categories directly assigned to the
    product and returns the first one whose custom field `connectorStripeTax_TaxCode` is set.
 2. **Error**: if no category carries a code, it throws `TaxCodeNotFoundError` and the whole cart
-   update fails. There is no default tax code — see
-   [ADR-006](../context/decisions/adr-006-tax-code-resolution-strategy.md).
-
-> **Only the category scan is active.** Three further strategies — product/line-item custom
-> fields, the `TAX_CODE_CATEGORY_MAPPING_JSON` mapping, and parent-category traversal — exist in
-> `tax-code.service.js` but are **commented out** (lines ~44-62). Earlier revisions of this README
-> advertised them as a live "5-strategy hierarchy"; they are not reachable. Re-enabling any of them
-> means uncommenting the branch and re-testing its supporting path
-> (`findFirstTaxCodeInHierarchy` / `taxCodeMappingConfig`). See
-> `context/business-rules/tax-code-resolution.md` Rule 2.
+   update fails. There is no default tax code.
 
 **Caching:** 5-minute TTL cache for shipping method API calls
 
@@ -426,7 +419,5 @@ For more detailed documentation, see:
 
 - [Root README](../README.md) - Project overview and architecture
 - [Configuration Guide](../context/ARCHITECTURE.md) - Detailed environment variable reference
-- [Deployment Guide](../context/deployment.md) - Step-by-step deployment instructions
 - [Tax Code Guide](../context/business-rules/tax-code-resolution.md) - Tax code configuration and mapping
-- [Troubleshooting Guide](../context/known-issues.md) - Common issues and solutions
 - [connect.yaml](../connect.yaml) - Complete deployment configuration

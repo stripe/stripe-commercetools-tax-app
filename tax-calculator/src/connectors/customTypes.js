@@ -16,9 +16,9 @@ export const CART_TAX_FIELD_NAMES = {
   CURRENCIES: 'connectorStripeTax_currencies',
   EXPIRES_AT: 'connectorStripeTax_expiresAt',
   CALCULATION_TIMESTAMP: 'connectorStripeTax_calculationTimestamp',
-  // The destination the stored calculation was made for. A calculation may only be re-applied to
-  // a cart still delivering to that country; one stored without it predates SB3-218 and is
-  // recalculated instead of trusted.
+  // The destination the stored calculation was made for, kept as an informational record only.
+  // Since SB3-238 (ADR-012) nothing reads it to decide a re-apply — it is shopper-writable — the
+  // decision reads the retrieved calculation's own customer_details.address.
   DESTINATION_COUNTRY: 'connectorStripeTax_destinationCountry'
 };
 

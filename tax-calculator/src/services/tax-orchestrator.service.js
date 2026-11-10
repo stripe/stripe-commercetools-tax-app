@@ -7,7 +7,6 @@ import { taxBehaviorService } from './tax-behavior.service.js';
 import categoryService from './category.service.js';
 import taxCodeService from './tax-code.service.js';
 import updateActionService from './update-action.service.js';
-import { CART_TAX_FIELD_NAMES } from '../connectors/customTypes.js';
 
 /**
  * Tax Orchestrator Service
@@ -574,22 +573,6 @@ class TaxOrchestratorService {
   }
 
   /**
-   * Every country this cart currently delivers to, in the same shape update-action.service.js
-   * records alongside a calculation — sorted, comma-separated, deduplicated — so the two can be
-   * compared directly when deciding whether a stored calculation may be re-applied.
-   *
-   * @param {Object} cart - commercetools cart
-   * @returns {string} Sorted, comma-separated destination countries
-   */
-  summariseCartDestinations(cart) {
-    const destinations = cart.shippingMode === 'Multiple' && cart.shipping?.length
-      ? cart.shipping.map(shipping => this.resolveDestinationCountry(cart, shipping))
-      : [this.resolveDestinationCountry(cart)];
-
-    return [...new Set(destinations.filter(Boolean))].sort().join(',');
-  }
-
-  /**
    * Reject a delivery address that locates the order without naming its country.
    *
    * commercetools requires `country` on every Address, so this combination cannot arrive through
@@ -712,23 +695,24 @@ class TaxOrchestratorService {
       throw new Error(`reapplyExistingCalculation called on cart ${cart.id} with no calculationReferences`);
     }
 
-    // Re-applying trusts a stored calculation without asking Stripe again, so it is only safe
-    // while that calculation still belongs to where the order is going. A calculation stored
-    // before SB3-218 carries no destination at all and may have been made against a shopper's
-    // cart.country; recalculating is how the fix reaches carts that already exist.
-    const storedDestinations = cart.custom?.fields?.[CART_TAX_FIELD_NAMES.DESTINATION_COUNTRY];
-    const currentDestinations = this.summariseCartDestinations(cart);
-
-    if (!storedDestinations || storedDestinations !== currentDestinations) {
-      logger.info('Stored calculation does not match the cart destination — recalculating', {
+    // Re-apply restores only the first stored calculation (see the retrieve below), so a cart that
+    // ships to more than one destination cannot be re-applied safely from it — recalculate it.
+    // (ADR-008 negative; ADR-012.)
+    if (cart.shippingMode === 'Multiple') {
+      logger.info('Multiple-shipping cart cannot be re-applied from a single calculation — recalculating', {
         cartId: cart.id,
-        calculationId,
-        storedDestinations: storedDestinations || 'none recorded',
-        currentDestinations
+        calculationId
       });
       return this.orchestrateTaxCalculation(cart);
     }
 
+    // Retrieve the stored calculation first. The destination it was made for is read from the
+    // calculation itself (customer_details.address — the address Stripe taxed, which a shopper
+    // cannot write), never from a cart custom field: connectorStripeTax_destinationCountry is
+    // writable through the My Carts API and must not decide whether a calculation may be replayed
+    // (SB3-238, ADR-012). Only a calculation Stripe reports as missing is recalculated here (see
+    // the catch); every other error surfaces through the normal mapping.
+    let calculation;
     try {
       logger.info('Retrieving existing Stripe Tax calculation for re-apply', {
         cartId: cart.id,
@@ -736,16 +720,85 @@ class TaxOrchestratorService {
       });
 
       const stripeClient = createStripeClient();
-      const calculation = await stripeClient.tax.calculations.retrieve(calculationId, {
-        expand: ['line_items']
+      // Bound this retrieve against the extension's 2000 ms budget: it runs on the synchronous path
+      // before the destination can be decided, so the SDK defaults (80 s timeout, one network
+      // retry) could blow the budget. One attempt, short timeout; a timeout re-throws like any
+      // other non-missing error (SB3-238 review; ADR-012 Negative; known-issues Issue 56).
+      calculation = await stripeClient.tax.calculations.retrieve(
+        calculationId,
+        { expand: ['line_items'] },
+        { timeout: 1500, maxNetworkRetries: 0 }
+      );
+    } catch (error) {
+      // Recalculate ONLY when the stored calculation is genuinely gone. Any other retrieve error
+      // (auth, rate limit, permission, connection, outage — not all of them transient) must surface
+      // through tax-error-handler — which maps only StripeInvalidRequestError/StripeAPIError and
+      // sends the rest to its generic handler — not silently mint a new calculation that diverges
+      // from the PaymentIntent's reference (ADR-008). (SB3-238 review, ADR-012.)
+      const calculationGone = error?.code === 'resource_missing' || error?.statusCode === 404;
+      if (!calculationGone) {
+        logger.error('Retrieving the stored calculation failed with a non-missing error — surfacing it', {
+          cartId: cart.id,
+          calculationId,
+          errorCode: error?.code,
+          errorType: error?.type,
+          statusCode: error?.statusCode
+        });
+        throw error;
+      }
+      logger.warn('The stored calculation no longer exists — recalculating', {
+        cartId: cart.id,
+        calculationId,
+        error: error.message
       });
+      return this.orchestrateTaxCalculation(cart);
+    }
 
+    // The re-applied reference is connectorStripeTax_calculationReferences[0], itself a
+    // shopper-writable cart field. Bind the retrieved calculation to THIS cart before trusting it:
+    // every line item records its cartId when the calculation is made (Single carts reach here, so
+    // the stamp is in createSingleRequestForGroup), so a FIRST reference pointing at another cart's
+    // calculation is rejected and recalculated (which overwrites the field with a fresh reference).
+    // This only guards the reference re-apply reads: a SECOND reference appended to the field is not
+    // re-applied, survives this pass (no setCustomType) and is bound to the order by order-syncer at
+    // filing (cart id + destination; same-cart same-jurisdiction still passes; order-sync.md Rule 11).
+    const calcLineItems = calculation?.line_items?.data ?? [];
+    const belongsToCart = calcLineItems.length > 0 && calcLineItems.every((li) => li.metadata?.cartId === cart.id);
+    if (!belongsToCart) {
+      logger.warn('Stored calculation is not bound to this cart — recalculating', {
+        cartId: cart.id,
+        calculationId
+      });
+      return this.orchestrateTaxCalculation(cart);
+    }
+
+    // A stored calculation may only be re-applied while the cart still delivers to the exact
+    // jurisdiction it was made for. Compare at the connector's jurisdiction granularity
+    // (country + state + city + postal code) on both sides, reusing createAddressKey().
+    const storedAddress = calculation?.customer_details?.address;
+    const currentAddress = this.extractCustomerAddress(cart);
+    const storedDestinationKey = this.createAddressKey(storedAddress);
+    const currentDestinationKey = this.createAddressKey(currentAddress);
+
+    if (storedDestinationKey !== currentDestinationKey) {
+      // Log only the two countries, not the full address keys: the rest of the module keeps address
+      // values out of logs (identifiers masked `[PRESENT]`, address check logs country only).
+      logger.info('Stored calculation does not match the cart destination — recalculating', {
+        cartId: cart.id,
+        calculationId,
+        storedCountry: storedAddress?.country,
+        currentCountry: currentAddress?.country
+      });
+      return this.orchestrateTaxCalculation(cart);
+    }
+
+    try {
       const lineItemActions = updateActionService.createLineItemActionsFromCalculation(
         calculation,
         null
       );
 
-      const shippingTaxAction = cart.shippingMode === 'Single' && cart.shippingInfo
+      const shippingTaxAction = cart.shippingInfo
         ? updateActionService.createShippingTaxUpdateAction(calculation)
         : null;
 
@@ -788,11 +841,24 @@ class TaxOrchestratorService {
       return 'no_ship_from';
     }
     
+    // Normalise each subfield so the key is stable across the two sources it compares: Stripe may
+    // canonicalise the echoed `customer_details.address` (state casing, surrounding whitespace)
+    // while the commercetools address is raw. Trim + upper-case removes those cosmetic differences
+    // (a false mismatch would otherwise mint an extra billable recalculation — monthly-quota rule),
+    // and absent subfields coalesce to null on both sides: Stripe echoes an empty field as null,
+    // commercetools omits it (undefined), and JSON.stringify keeps null but drops undefined — so an
+    // unchanged destination with no state must key identically from either source (SB3-238, ADR-012).
+    const norm = (v) => (v == null ? null : String(v).trim().toUpperCase());
+    // Postal codes also differ by internal spacing between sources (e.g. Stripe may store a UK/CA
+    // postcode as "SW1A1AA" where commercetools has "SW1A 1AA"); collapse all whitespace so the
+    // same postcode keys identically either way. City/state keep internal spaces — those are
+    // meaningful ("New York").
+    const normPostal = (v) => (v == null ? null : String(v).replace(/\s+/g, '').toUpperCase());
     return JSON.stringify({
-      country: address.country,
-      state: address.state,
-      city: address.city,
-      postal_code: address.postal_code
+      country: norm(address.country),
+      state: norm(address.state),
+      city: norm(address.city),
+      postal_code: normPostal(address.postal_code)
     });
   }
 
