@@ -1,10 +1,54 @@
 # Process Address Validation
 
+**Trigger:** `POST /taxCalculator/validateAddress` with a JSON body `{ address }`
+(`tax-calculator/src/index.js:21`, `tax-calculator/src/routes/address.validation.route.js:6-9`). This is a
+standalone endpoint; the cart tax flow does not call it.
+**Modules involved:** tax-calculator — `address.validation.controller.js`, `address.service.js`,
+`validators/address.validator.js`. Rules: `business-rules/address-validation.md` Rules 1–4.
+**Outcome:** HTTP 200 `{ success: true, validation: { local, stripe }, address: { suggestions } }` when the
+address passes the local rules **and** a real Stripe test calculation. The same body with `success: false`
+and HTTP 400 otherwise.
+
+## Happy Path
+
+1. Body check: `address` present, an object, not an array — `tax-calculator/src/controllers/address.validation.controller.js:19-31`
+2. Structure check: `country` present and a string — `tax-calculator/src/services/address.service.js:23-33`, `:81-110`
+3. Local per-country rules (US strict; CA and IN partial; everyone else country only) —
+   `tax-calculator/src/services/address.service.js:36`, `:118-125`; `tax-calculator/src/validators/address.validator.js:151-205`
+4. Locally valid → one real Stripe calculation of 100 units, tax code `txcd_99999999`, currency from the
+   country map, else `ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY`, else `usd` —
+   `tax-calculator/src/services/address.service.js:41-43`, `:135-178`
+5. The result is built: `success` only when the local check passed and Stripe accepted —
+   `tax-calculator/src/services/address.service.js:188-206`
+6. 200 — `tax-calculator/src/controllers/address.validation.controller.js:55`
+
+## Error Paths
+
+| Condition | Behavior | File |
+| --- | --- | --- |
+| No `address`, or not an object, or an array | 400 `{ error }` | `tax-calculator/src/controllers/address.validation.controller.js:21-31` |
+| No `country`, or `country` not a string | 400 `success: false`, structure errors; no Stripe call | `tax-calculator/src/services/address.service.js:23-33`; `tax-calculator/src/controllers/address.validation.controller.js:51-53` |
+| `country` not an ISO 3166-1 alpha-2 code | 400 `success: false`, `INVALID_COUNTRY`; no Stripe call | `tax-calculator/src/validators/address.validator.js:161-163` |
+| A local rule fails | 400 `success: false`; no Stripe call | `tax-calculator/src/services/address.service.js:41`; `tax-calculator/src/controllers/address.validation.controller.js:51-53` |
+| Stripe call fails (invalid location, `stripe_tax_inactive`, bad key, network) | 400 `success: false` carrying `validation.stripe.code` (`error.code`, else `STRIPE_ERROR`) | `tax-calculator/src/services/address.service.js:44-64` |
+| Any other unexpected exception | 500 | `tax-calculator/src/controllers/address.validation.controller.js:57-68` |
+
+## Notes
+
+- Every locally valid request creates a real, persisted Stripe calculation.
+- This endpoint has its own Stripe client, created when the module is imported from
+  `process.env.STRIPE_API_TOKEN` (`tax-calculator/src/services/address.service.js:5`).
+
+---
+
 ## Description
 
 The process of address validation is a two-tier validation mechanism implemented in the address service. This system automatically validates addresses using local business rules and verifies them with Stripe's Tax API to ensure addresses are acceptable for tax calculations.
 
 The process is designed to handle e-commerce scenarios where addresses must be validated before tax calculations can be performed. The solution uses a sequential validation approach: first validating address structure and local business rules, then verifying with Stripe that the address can be used for tax calculations. This ensures both format correctness and Stripe API acceptance.
+
+This validation is not a precondition of tax calculation: it is a standalone endpoint that a storefront may
+call, and the API extension that calculates cart tax does not call it.
 
 **Main Flow**: The system first validates the address structure (Step 0), then performs local validation using country-specific rules (Step 1), and finally verifies the address with Stripe by creating a temporary tax calculation (Step 2). The result includes validation status, error details, user-friendly messages, and actionable guidance for address corrections.
 
@@ -92,7 +136,6 @@ The solution implements a sequential two-tier validation algorithm that:
 │  - Validates required fields                                    │
 │  - Validates postal code format                                 │
 │  - Validates state codes                                        │
-│  - Validates field lengths                                      │
 └───────────────────────┬─────────────────────────────────────────┘
                         │
             ┌───────────┴───────────┐
@@ -110,7 +153,7 @@ The solution implements a sequential two-tier validation algorithm that:
 │  - Uses tax code: txcd_99999999                                │
 │  - Sets address_source: 'shipping'                              │
 │  - If successful: address accepted                              │
-│  - If error: maps error code to user message                    │
+│  - If error: maps error code to user message                   │
 └───────────────────────┬─────────────────────────────────────────┘
                         │
             ┌───────────┴───────────┐
@@ -128,7 +171,7 @@ The solution implements a sequential two-tier validation algorithm that:
 │                                                                   │
 │  - Determines overall success                                  │
 │  - Combines local and Stripe results                           │
-│  - Generates suggestions from errors                            │
+│  - Generates suggestions from errors                           │
 │  - Returns complete validation result                           │
 └───────────────────────┬─────────────────────────────────────────┘
                         │
@@ -213,6 +256,10 @@ The solution implements a sequential two-tier validation algorithm that:
 - `INVALID_STATE`: State code is invalid for country
 - `INVALID_LINE1`: Line1 length is invalid
 - `INVALID_CITY`: City length is invalid
+- `INVALID_COUNTRY`: country is not an ISO 3166-1 alpha-2 code
+- `MISSING_REQUIRED_FIELD`: India — neither `postal_code` nor `state` present
+- `MISSING_COUNTRY`: the validator's own missing-country code —
+  `tax-calculator/src/validators/address.validator.js:157-163`, `:69-74`
 
 #### Step 2: Stripe Verification
 
@@ -470,7 +517,8 @@ The system maps countries to default currencies for Stripe verification:
 
 **Temporary Calculation Approach**:
 - Creates a minimal Stripe tax calculation to verify address acceptance
-- Uses minimum amount (100 cents) to minimize cost
+- Uses minimum amount (100 cents)
+- Each call creates a persisted calculation against the account's Stripe Tax usage
 - Uses general tax code (`txcd_99999999`) for verification
 - Sets `address_source: 'shipping'` to match typical use case
 - Calculation is created but not used (verification only)
@@ -478,11 +526,9 @@ The system maps countries to default currencies for Stripe verification:
 **Benefits**:
 - Confirms Stripe accepts the address before actual tax calculations
 - Provides early feedback on address issues
-- Uses minimal API resources (small calculation)
 
 **Limitations**:
 - Requires Stripe API call (adds latency)
-- Creates temporary calculation (minimal cost)
 - Only verifies if local validation passes (optimization)
 
 ### Error Handling Strategy
@@ -499,8 +545,8 @@ The system maps countries to default currencies for Stripe verification:
 
 **Non-Fatal Errors**:
 - Stripe verification errors are logged but don't throw exceptions
-- Service always returns validation result (never throws)
-- Controller handles HTTP response based on result
+- Controller handles HTTP response based on result: 400 when `success` is false, 200 otherwise —
+  `tax-calculator/src/controllers/address.validation.controller.js:51-55`
 
 ### Suggestion Generation Logic
 
@@ -683,8 +729,10 @@ const validationResult = await addressService.validateAddress(address);
 ### Logging and Debugging
 
 - **Request Logging**: Logs address validation requests with request ID
-- **Structure Validation**: Logs structure errors for debugging
-- **Local Validation**: Logs validation results and error counts
+- **Structure and Local Validation**: not logged on their own; the controller's completion log carries only
+  `success` and whether a Stripe verification ran —
+  `tax-calculator/src/services/address.service.js:81-125`,
+  `tax-calculator/src/controllers/address.validation.controller.js:44-49`
 - **Stripe Verification**: Logs verification attempts and results
 - **Stripe Errors**: Logs Stripe API errors with full context (code, type, message)
 - **Result Logging**: Logs final validation result (success, has Stripe verification)
@@ -747,7 +795,8 @@ POST /v1/tax/calculations
 
 1. **STRIPE_API_TOKEN** (required):
    - Stripe API key for tax calculations
-   - Used to initialize Stripe client
+   - Used to initialize this service's own Stripe client, created once when the module is imported
+     (`tax-calculator/src/services/address.service.js:5`)
    - Format: `sk_test_...` or `sk_live_...`
 
 2. **ADDRESS_VALIDATION_STRIPE_DEFAULT_CURRENCY** (optional):
@@ -809,4 +858,3 @@ The process of address validation is a robust two-tier system that:
 7. **Optimizes performance** by only verifying with Stripe when local validation passes
 
 This system ensures efficient, accurate, and user-friendly address validation for tax calculations in e-commerce platforms. The two-tier approach provides fast local validation while ensuring Stripe API compatibility, and the comprehensive error handling and suggestion generation help users correct address issues quickly and effectively.
-

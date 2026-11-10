@@ -278,11 +278,11 @@ gcloud iam service-accounts keys create commercetools-key.json \
 
 ```bash
 # Create topic
-gcloud pubsub topics create ct-stripe-tax-topic --project=your-project-id
+gcloud pubsub topics create stripe-tax-topic --project=your-project-id
 
 # Create push subscription pointing to your ngrok URL
-gcloud pubsub subscriptions create ct-stripe-tax-subscription \
-    --topic=ct-stripe-tax-topic \
+gcloud pubsub subscriptions create stripe-tax-subscription \
+    --topic=stripe-tax-topic \
     --push-endpoint=https://your-ngrok-url.ngrok.io/orderSyncer \
     --project=your-project-id
 ```
@@ -291,7 +291,7 @@ gcloud pubsub subscriptions create ct-stripe-tax-subscription \
 
 ```bash
 # Publish a test message
-gcloud pubsub topics publish ct-stripe-tax-topic \
+gcloud pubsub topics publish stripe-tax-topic \
     --message="Test message" \
     --project=your-project-id
 ```
@@ -391,7 +391,5 @@ For more detailed documentation, see:
 
 - [Root README](../README.md) - Project overview and architecture
 - [Configuration Guide](../context/ARCHITECTURE.md) - Detailed environment variable reference
-- [Deployment Guide](../context/deployment.md) - Step-by-step deployment instructions
 - [Tax Code Guide](../context/business-rules/tax-code-resolution.md) - Tax code configuration and mapping
-- [Troubleshooting Guide](../context/known-issues.md) - Common issues and solutions
 - [connect.yaml](../connect.yaml) - Complete deployment configuration

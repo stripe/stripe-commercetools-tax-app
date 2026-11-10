@@ -1,5 +1,51 @@
 # Process Category Retrieval
 
+**Trigger:** step 5 of `process-tax-orchestration.md` —
+`categoryService.getCategoriesForProducts(productIds, { staged: false, locale: cart.locale || undefined, useCache: true })`
+(`tax-calculator/src/services/tax-orchestrator.service.js:58-69`).
+**Modules involved:** tax-calculator — `category.service.js`. Rule: `business-rules/tax-code-resolution.md` Rule 3, *Category data is cached for 5 minutes*.
+**Outcome:** a `Map<productId, Category[]>` of each product's **directly assigned** categories, expanded,
+with `parent` left as a reference. A product the query did not return is absent from the Map, and the
+caller substitutes `[]` for it.
+
+## Happy Path
+
+1. No product ids → empty Map — `tax-calculator/src/services/category.service.js:38-40`
+2. Falsy ids dropped and duplicates removed — `tax-calculator/src/services/category.service.js:49-53`
+3. Cache lookup under `categories_{current|staged}_{locale|default}`; a full hit returns at once —
+   `tax-calculator/src/services/category.service.js:59-69`, `:255-280`, `:302-304`
+4. A partial hit keeps the cached products and fetches only the missing ones —
+   `tax-calculator/src/services/category.service.js:69-79`
+5. Up to 500 ids → one product-projection query, `where id in (…)`, `expand: ['categories[*]']`,
+   `limit: 500` — `tax-calculator/src/services/category.service.js:120-148`
+6. More than 500 → batches of 500, at most 5 at a time, each group with `Promise.allSettled` —
+   `tax-calculator/src/services/category.service.js:124-125`, `:170-221`
+7. Each projection's categories are extracted: the expanded object, or an `{ id, typeId }` stub when not
+   expanded — `tax-calculator/src/services/category.service.js:229-246`
+8. Cached and fetched results are merged and written back to the cache —
+   `tax-calculator/src/services/category.service.js:92-99`, `:285-297`
+9. The Map is returned — `tax-calculator/src/services/category.service.js:102`
+
+## Error Paths
+
+| Condition | Behavior | File |
+| --- | --- | --- |
+| The query fails (≤ 500 products) | logged and re-thrown; the cart update is answered with the SDK error's `statusCode`, else 500 | `tax-calculator/src/services/category.service.js:104-110`; `tax-calculator/src/services/tax-error-handler.service.js:213-217` |
+| A product is not in the current projection (e.g. unpublished) | absent from the Map → `[]` → 400 `TaxCodeNotFoundError` | `tax-calculator/src/services/category.service.js:155-158`; `tax-calculator/src/services/tax-code.service.js:65-69` |
+| A category reference comes back unexpanded | `{ id, typeId }` stub with no custom fields → no tax code from it | `tax-calculator/src/services/category.service.js:241-244` |
+
+## Notes
+
+- **The cache holds one Map per key with one timestamp, and every save replaces it.** What is saved is only
+  the products of the current request (cached subset plus fetched), so products cached by earlier carts but
+  absent from this one are evicted
+  (`tax-calculator/src/services/category.service.js:92-99`, `:285-291`).
+- **The cache is per instance**, in memory, and not shared across replicas
+  (`tax-calculator/src/services/category.service.js:23-24`).
+- **Only published data is read** (`staged: false` — `tax-calculator/src/services/tax-orchestrator.service.js:65`).
+
+---
+
 ## Description
 
 The process of category retrieval is a high-performance data fetching mechanism implemented in the category service. This system efficiently retrieves expanded product categories from the commercetools API using Product Projections, with intelligent caching and batch processing to optimize performance for large product catalogs.
@@ -196,7 +242,8 @@ The solution implements a multi-layered optimization algorithm that:
 
 2. **Options Processing**:
    - Extracts `staged` (default: false), `locale` (optional), `useCache` (default: true)
-   - Logs request with total products, staged flag, locale, and cache setting
+   - No request log is written here; the method logs only cache hits and errors
+     (`tax-calculator/src/services/category.service.js:37-111`)
 
 3. **Cache Check** (if enabled):
    - Calls `getFromCache(uniqueProductIds, staged, locale)`
@@ -214,7 +261,8 @@ The solution implements a multi-layered optimization algorithm that:
 
 6. **Cache Update** (if enabled):
    - Calls `saveToCache(categoriesMap, staged, locale)`
-   - Updates cache with merged results for future requests
+   - Updates cache with merged results for future requests — by **replacing** the whole entry for that key
+     with this request's products and a new timestamp (see Notes at the top)
 
 7. **Return**:
    - Returns `Map<string, Array<Category>>` with all product categories
@@ -262,7 +310,8 @@ const categoriesMap = await categoryService.getCategoriesForProducts(
    - Creates Map: `Map<productId, categories[]>`
 
 6. **Logging**:
-   - Logs requested count, fetched count, and failed count
+   - Nothing is logged by a single query; only the batch path logs totals and failures
+     (`tax-calculator/src/services/category.service.js:120-161`, `:179-184`, `:207-218`)
 
 7. **Return**:
    - Returns `Map<string, Array<Category>>`
@@ -295,12 +344,10 @@ const queryArgs = {
 3. **Parallel Execution**:
    - Uses `Promise.allSettled()` to execute batch groups
    - Each batch calls `fetchCategoriesFromAPI(batch, options)`
-   - Continues processing even if some batches fail
 
 4. **Result Combination**:
    - Iterates through batch results
    - For fulfilled promises, merges results into combined Map
-   - For rejected promises, logs error but continues processing
 
 5. **Logging**:
    - Logs total requested, total fetched, batch count, and any failures
@@ -312,7 +359,6 @@ const queryArgs = {
 ```javascript
 // 1200 products → 3 batches of 500, 500, 200
 // Execute batches 1-5 concurrently, then 6-10, etc.
-// If batch 2 fails, batches 1 and 3 still succeed
 ```
 
 #### Step 4: Extract Categories from Projection
@@ -345,11 +391,14 @@ const queryArgs = {
         connectorStripeTax_TaxCode: "txcd_12345678"
       }
     },
-    parent: { obj: { /* parent category */ } }
+    parent: { typeId: "category", id: "category-456" }
   },
   // ... more categories
 ]
 ```
+
+Only `categories[*]` is expanded, so `parent` arrives as a plain reference
+(`tax-calculator/src/services/category.service.js:135-137`).
 
 #### Step 5: Cache Management
 
@@ -435,8 +484,7 @@ cache = Map {
 
 **Error Handling**:
 - Uses `Promise.allSettled()` instead of `Promise.all()`
-- Failed batches don't prevent successful batches from completing
-- Logs errors for failed batches but continues processing
+- Logs batch failures but continues processing
 
 ### Caching Strategy
 
@@ -492,7 +540,7 @@ const categoriesMap = await categoryService.getCategoriesForProducts(
   productIds,
   {
     staged: false,
-    locale: cart.locale || 'en',
+    locale: cart.locale || undefined,
     useCache: true
   }
 );
@@ -525,7 +573,7 @@ const categories1 = await categoryService.getCategoriesForProducts(
   ["product-1", "product-2"],
   { useCache: true }
 );
-// Logs: "Categories fetched from API" (requested: 2, fetched: 2)
+// (no log on a plain fetch)
 
 // Second request (within 5 minutes): Uses cache
 const categories2 = await categoryService.getCategoriesForProducts(
@@ -587,16 +635,19 @@ const categoriesMap = await categoryService.getCategoriesForProducts(
 - **Duplicate IDs**: Removes duplicates before API calls
 - **Cache Expiration**: Automatically invalidates expired cache entries
 - **Partial Cache**: Handles cases where some products are cached and others are not
-- **Batch Failures**: Individual batch failures don't prevent successful batches
 - **Missing Categories**: Products without categories return empty arrays
 - **Unexpanded Categories**: Handles category references that aren't expanded
-- **API Errors**: Logs errors and continues processing where possible
+- **API Errors**: Only a failed *batch* is logged and skipped. A failed single query (≤ 500 products) is
+  logged and re-thrown, which fails the cart update
+  (`tax-calculator/src/services/category.service.js:104-110`, `:201-212`)
 
 ### Logging and Debugging
 
-- **Request Logging**: Logs total products, staged flag, locale, and cache setting
-- **Cache Operations**: Logs cache hits (full/partial) and misses
-- **API Calls**: Logs requested count, fetched count, and failed count
+- **Request Logging**: none
+- **Cache Operations**: Logs cache hits (full/partial) at debug level; a miss is not logged
+  (`tax-calculator/src/services/category.service.js:65-75`, `:255-280`)
+- **API Calls**: only the batch path logs counts
+  (`tax-calculator/src/services/category.service.js:179-184`, `:215-218`)
 - **Batch Processing**: Logs batch count, batch size, and concurrency limits
 - **Error Logging**: Logs batch failures with batch index and error details
 - **Performance Metrics**: Logs cache save operations with product counts
@@ -680,4 +731,3 @@ The process of category retrieval is a high-performance, cache-optimized system 
 8. **Provides comprehensive logging** for cache operations, API calls, and batch processing
 
 This system ensures efficient, scalable, and maintainable category retrieval for e-commerce platforms. The caching strategy reduces API calls for repeated products, batch processing handles large catalogs efficiently, and partial cache support optimizes incremental fetching. The concurrent batch execution balances throughput with API rate limits, ensuring optimal performance for tax calculations and other category-dependent operations.
-

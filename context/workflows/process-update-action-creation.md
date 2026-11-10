@@ -1,5 +1,63 @@
 # Process Update Action Creation
 
+**Trigger:** step 12 of `process-tax-orchestration.md` —
+`createCartUpdateActionsFromMultipleCalculations(calculations, shippingInfoGroups, requests, cart)` with the
+**successful** calculations, **all** the requests built, and `shippingInfoGroups` (filled in Multiple mode
+only) — `tax-calculator/src/services/tax-orchestrator.service.js:104-109`, `:148-157`. Three of its builders
+are reused by `process-stored-calculation-reapply.md`.
+**Modules involved:** tax-calculator — `update-action.service.js`, `connectors/customTypes.js`. Rules:
+`business-rules/tax-calculation.md` Rules 3 and 5 (*Update action ordering is mandatory*; *Calculation
+references must be written via setCustomType in the same response*); `business-rules/calculation-results.md`
+Rules 1–6 (all).
+**Outcome:** an ordered array — `setCustomType`, then `setLineItemTotalPrice` and `setLineItemTaxAmount` per
+line item (and shipping key), then `setShippingMethodTaxAmount`, then `setCartTotalTax` when the total is
+positive.
+
+## Happy Path
+
+1. All calculations are combined: references, summed amounts, `{id}_{CURRENCY}` and `{id}_{ISO expiry}`
+   strings, concatenated breakdowns — `tax-calculator/src/services/update-action.service.js:28`, `:82-191`
+2. `setCustomType` on the cart type, eight fields including `connectorStripeTax_destinationCountry`, which
+   summarises the destinations of the requests sent — `tax-calculator/src/services/update-action.service.js:31-32`, `:199-237`
+3. `setLineItemTotalPrice` per line item × shipping key: total = Stripe's line `amount`, unit price =
+   `round(amount / quantity)` — `tax-calculator/src/services/update-action.service.js:37-38`, `:528-608`
+4. `setLineItemTaxAmount` per line item × shipping key: `totalGross` from the provider's taxed total; rate from the
+   breakdown that reproduces the tax within one cent, else the most common tax type; shipping key read from
+   the line item's metadata — `tax-calculator/src/services/update-action.service.js:43-44`, `:292-360`, `:681-746`, `:754-838`
+5. Every line item with a total-price action but no tax action gets a zero-tax one, labelled with the
+   destination named by the calculation — `tax-calculator/src/services/update-action.service.js:350-353`, `:445-500`
+6. Shipping:
+   - `shippingInfoGroups` non-empty (Multiple) → one action per `cart.shipping` key — `tax-calculator/src/services/update-action.service.js:48-50`, `:1112-1211`
+   - otherwise (Single) → one unkeyed action from the combined calculation — `tax-calculator/src/services/update-action.service.js:51-56`, `:1237-1301`
+7. `setCartTotalTax` = combined `amount_total`, when positive — `tax-calculator/src/services/update-action.service.js:60-63`, `:269-282`
+
+## Error Paths
+
+| Condition | Behavior | File |
+| --- | --- | --- |
+| Any exception while building | logged and re-thrown → generic handler: the error's status, else 500 | `tax-calculator/src/services/update-action.service.js:68-71`; `tax-calculator/src/services/tax-error-handler.service.js:213-217` |
+| No breakdown matches a line item | action named `no_tax` with rate 0, `totalGross` from the provider's taxed total | `tax-calculator/src/services/update-action.service.js:706-718` |
+| Multiple mode: no calculation mapped to a cart shipping key | zero-tax action carrying the cart's shipping price for that key | `tax-calculator/src/services/update-action.service.js:1161-1165` |
+| Combined `amount_total` ≤ 0 | no `setCartTotalTax`; warn | `tax-calculator/src/services/update-action.service.js:270-273` |
+
+## Notes
+
+- **Multiple-mode shipping actions are matched to calculations by array position.** `requests[i]` is paired
+  with `calculations[i]` (`tax-calculator/src/services/update-action.service.js:1013-1016`). Line-item
+  actions take the key from each line item's metadata (`:296-302`).
+  (`business-rules/calculation-results.md` Rule 5, *Multiple-mode shipping tax is one action per cart shipping
+  key, matched to calculations by position*.)
+- **Each fresh calculation replaces the cart's custom type and all its custom fields** — `setCustomType` with
+  the connector's type (`tax-calculator/src/services/update-action.service.js:199-216`).
+- **Zero-tax labels.** Multiple-mode zero-tax shipping and every zero-tax line item are labelled through
+  `destinationCountryOf()` (`:256-260`, `:956`).
+- **Shipping is summed across ship-from groups** — see `process-tax-orchestration.md` → Notes.
+- **The cart type's key** defaults to `connector-stripe-tax-calculation-reference` and is overridable with
+  `CUSTOM_TYPE_CART_KEY`; it is registered for the `order` resource type, which commercetools uses for carts
+  and orders alike (`tax-calculator/src/connectors/customTypes.js:113-121`).
+
+---
+
 ## Description
 
 The process of update action creation is a transformation mechanism implemented in the update-action service. This system converts Stripe tax calculation responses into commercetools cart update actions, enabling the application of calculated taxes to carts and line items in the commercetools platform.
@@ -37,7 +95,7 @@ The main challenges addressed by this solution include:
 
 The solution implements a multi-step transformation algorithm that:
 
-1. **Combines calculations for metadata**: Aggregates all calculations into a single combined result for cart custom type metadata only
+1. **Combines calculations for metadata**: Aggregates all calculations into a single combined result for cart custom type metadata
 2. **Maps calculations to shipping keys**: Uses metadata or request mapping to associate calculations with their shipping keys
 3. **Creates line item actions**: Processes each calculation individually to create line item tax update actions with shipping key association
 4. **Handles duplicates**: Combines duplicate line items (same lineItemId + shippingKey) with accurate effective rate calculation
@@ -46,7 +104,9 @@ The solution implements a multi-step transformation algorithm that:
 
 ### Key Features
 
-- **Selective Combination**: Combines calculations only for cart metadata, preserving individual calculation precision for line items and shipping
+- **Selective Combination**: Combines calculations for cart metadata; line items and Multiple-mode shipping
+  are processed individually to preserve precision. The combined result also builds the Single-mode shipping
+  action and the cart total in both modes — `tax-calculator/src/services/update-action.service.js:52`, `:60`
 - **Shipping Key Mapping**: Intelligent mapping of calculations to shipping keys using metadata or request-based mapping
 - **Duplicate Handling**: Combines duplicate line items with precise effective rate calculation based on base amounts
 - **Tax Breakdown Matching**: Multiple strategies for finding tax breakdowns (direct calculation, most common tax type, exact amount)
@@ -92,7 +152,7 @@ The solution implements a multi-step transformation algorithm that:
 ┌─────────────────────────────────────────────────────────────────┐
 │  STEP 3a: Create Line Item Total Price Actions                  │
 │  createLineItemTotalPriceActions()                              │
-│  - Sets totalPrice to base amount (without taxes)              │
+│  - Sets totalPrice to base amount                             │
 │  - Required for ExternalAmount tax mode                        │
 └───────────────────────┬─────────────────────────────────────────┘
                         │
@@ -168,7 +228,7 @@ The solution implements a multi-step transformation algorithm that:
 1. **Entry Point**: The Tax Orchestrator Service calls `createCartUpdateActionsFromMultipleCalculations()` with multiple Stripe calculations
 2. **Combine Calculations**: Combines all calculations for cart metadata (custom type fields only)
 3. **Create Cart Action**: Creates cart custom type update action with combined metadata
-4. **Create Line Item Total Price Actions**: Creates `setLineItemTotalPrice` actions to set base prices (without taxes) - REQUIRED for ExternalAmount mode
+4. **Create Line Item Total Price Actions**: Creates `setLineItemTotalPrice` actions to set base prices - REQUIRED for ExternalAmount mode
 5. **Create Line Item Tax Actions**: Processes each calculation to create line item tax update actions with shipping key mapping
 6. **Handle Duplicates**: Combines duplicate line items (same lineItemId + shippingKey) with effective rate calculation
 7. **Create Shipping Actions**: Creates shipping tax update actions for each shipping method (Single or Multiple mode)
@@ -189,19 +249,19 @@ The solution implements a multi-step transformation algorithm that:
 
 **Process**:
 
-1. **Combine Calculations** (for metadata only):
+1. **Combine Calculations** (for metadata):
    - Calls `combineCalculations(calculations)` to aggregate metadata
-   - This combination is ONLY used for cart custom type metadata
    - Line items and shipping are processed individually to preserve precision
 
 2. **Create Cart Custom Type Action**:
-   - Calls `createCartCustomTypeUpdateAction(combinedCalculation)`
+   - Calls `createCartCustomTypeUpdateAction(combinedCalculation, requests)`; the destination field is
+     derived from `requests` — `tax-calculator/src/services/update-action.service.js:31`
    - Creates `setCustomType` action for cart metadata
 
 3. **Create Line Item Total Price Actions** (REQUIRED for ExternalAmount mode):
    - Calls `createLineItemTotalPriceActions(calculations, shippingInfoGroups)`
    - Creates `setLineItemTotalPrice` actions for each line item
-   - Sets totalPrice to base amount (without taxes)
+   - Sets totalPrice to the base amount
    - Must be executed BEFORE tax actions
 
 4. **Create Line Item Tax Actions**:
@@ -225,7 +285,7 @@ The solution implements a multi-step transformation algorithm that:
 7. **Return Actions**:
    - Returns array of all update actions
 
-#### Step 2: Combine Calculations (Metadata Only)
+#### Step 2: Combine Calculations (Metadata)
 
 **Method**: `UpdateActionService.combineCalculations(calculations)`
 
@@ -247,13 +307,18 @@ The solution implements a multi-step transformation algorithm that:
 
 4. **Collect References**:
    - `calculation_references`: Array of all calculation IDs
-   - `currencies`: Array of all currencies (uppercase)
-   - `expires_at`: Array of all expiration timestamps (ISO format)
+   - `currencies`: Array of `{calculationId}_{CURRENCY}` strings, one per calculation
+   - `expires_at`: Array of `{calculationId}_{ISO timestamp}` strings, one per calculation —
+     `tax-calculator/src/services/update-action.service.js:152-159`
 
 5. **Return Combined Object**:
-   - Returns combined calculation object for metadata use only
+   - Returns combined calculation object
 
-**Important Note**: This combination is ONLY used for cart custom type metadata. Line items and shipping costs are processed directly from individual calculations to preserve shipping key mapping and breakdown precision.
+**Important Note**: The combined object builds the cart custom type metadata, the Single-mode shipping
+action and the `setCartTotalTax` action (`tax-calculator/src/services/update-action.service.js:52`, `:60`).
+Line items and Multiple-mode shipping are processed directly from individual calculations to preserve
+shipping key mapping and breakdown precision. With several ship-from groups that means summed shipping (see
+`process-tax-orchestration.md` → Notes).
 
 #### Step 3: Create Cart Custom Type Update Action
 
@@ -273,6 +338,9 @@ The solution implements a multi-step transformation algorithm that:
    - `CURRENCIES`: Array of currencies
    - `EXPIRES_AT`: Array of expiration timestamps
    - `CALCULATION_TIMESTAMP`: Current timestamp (ISO format)
+   - `DESTINATION_COUNTRY` (`connectorStripeTax_destinationCountry`): sorted, comma-separated, de-duplicated
+     destination countries of the requests sent — written as an informational record only; nothing reads it
+     (`tax-calculator/src/services/update-action.service.js:214`, `:231-237`)
 
 3. **Return**:
    - Returns commercetools `setCustomType` update action
@@ -285,7 +353,7 @@ The solution implements a multi-step transformation algorithm that:
 
 1. **Purpose**:
    - Creates `setLineItemTotalPrice` actions for each line item
-   - Sets `totalPrice` to the base amount (without taxes)
+   - Sets `totalPrice` to the base amount
    - This is REQUIRED for ExternalAmount tax mode in CommerceTools
    - Allows CommerceTools to correctly calculate `totalTax = totalGross - totalNet`
 
@@ -300,7 +368,7 @@ The solution implements a multi-step transformation algorithm that:
        - Creates `setLineItemTotalPrice` action with:
          - `lineItemId`: From `lineItemData.reference`
          - `externalTotalPrice.price.centAmount`: Unit price (amount / quantity)
-         - `externalTotalPrice.totalPrice.centAmount`: Total base amount (without taxes)
+         - `externalTotalPrice.totalPrice.centAmount`: Total base amount
          - `shippingKey`: Added if available (Multiple mode)
 
 4. **Handle Duplicates**:
@@ -318,7 +386,7 @@ The solution implements a multi-step transformation algorithm that:
 - This step is CRITICAL for ExternalAmount tax mode
 - `setLineItemTotalPrice` changes the line item's `priceMode` to `ExternalTotal`
 - CommerceTools requires all `ExternalTotal` line items to also have `externalTaxAmount` set
-- The base amount (without taxes) is stored in `totalPrice`, allowing CommerceTools to calculate tax correctly
+- The base amount is stored in `totalPrice`, allowing CommerceTools to calculate tax
 
 #### Step 3b: Create Line Item Tax Update Actions
 
@@ -342,7 +410,8 @@ The solution implements a multi-step transformation algorithm that:
 3. **Handle Duplicates**:
    - Groups actions by key: `${lineItemId}-${shippingKey || 'single'}`
    - If duplicate found:
-     - Combines tax amounts: `existing.centAmount + new.centAmount`
+     - Combines the `totalGross` amounts (base + tax): `existing.centAmount + new.centAmount`
+       (`tax-calculator/src/services/update-action.service.js:377-380`)
      - Calculates effective rate: `combinedTaxAmount / totalBaseAmount`
      - If base amount is 0, averages rates: `(existingRate + newRate) / 2`
    - Removes temporary `_baseAmount` field
@@ -354,9 +423,8 @@ The solution implements a multi-step transformation algorithm that:
      - This is required because `ExternalTotal` line items must have `externalTaxAmount` set
    - The `taxRate.country` on these zero-tax actions is resolved by `destinationCountryOf()` —
      tax breakdowns first, then `customer_details.address` as echoed back by Stripe. It is never
-     taken from `cart.country`, which selects prices and is shopper-controlled. The amount is
-     zero either way, but the country recorded on the cart must name the delivery jurisdiction
-     the calculation was actually made for. See `../decisions/adr-007-tax-destination-country.md`.
+     taken from `cart.country`, which selects prices. The amount is zero either way, but the country
+     recorded on the cart names the delivery jurisdiction the calculation was made for.
 
 5. **Return**:
    - Returns array of `setLineItemTaxAmount` actions
@@ -376,10 +444,14 @@ The solution implements a multi-step transformation algorithm that:
    - If breakdown found:
      - Creates `setLineItemTaxAmount` action with:
        - `lineItemId`: From `lineItemData.reference`
-       - `externalTaxAmount.totalGross.centAmount`: From `lineItemData.amount_tax`
+       - `externalTaxAmount.totalGross.centAmount`: the provider's taxed total for the line
+         (`tax-calculator/src/services/update-action.service.js:705`)
        - `externalTaxAmount.taxRate`: From breakdown `tax_rate_details`
        - `shippingKey`: Added if available (Multiple mode - REQUIRED)
      - Stores `_baseAmount` for effective rate calculation if duplicates
+   - If no breakdown is found: the action is still created, named `no_tax` with rate 0 and labelled with
+     `destinationCountryOf(calculation)`, with `totalGross` from the provider's taxed total —
+     `tax-calculator/src/services/update-action.service.js:706-718`
 
 3. **Return**:
    - Returns array of line item tax update actions
@@ -462,7 +534,7 @@ The solution implements a multi-step transformation algorithm that:
    - Sets `externalTaxAmount.taxRate` from breakdown
 
 4. **Return**:
-   - Returns shipping tax update action or null
+   - Returns the shipping tax update action
 
 #### Step 5: Create Cart Total Tax Action
 
@@ -508,6 +580,7 @@ The solution implements a multi-step transformation algorithm that:
 1. **STRATEGY 1: Use Requests** (Most Reliable):
    - If requests provided:
      - Maps by index: `requests[i].shippingKey` → `calculations[i]`
+       (`tax-calculator/src/services/update-action.service.js:1013-1016`)
      - If shippingKey already exists in map:
        - Combines shipping costs using `combineShippingCosts()`
      - Else:
@@ -516,7 +589,7 @@ The solution implements a multi-step transformation algorithm that:
 2. **STRATEGY 2: Use ShippingInfoGroups** (Fallback):
    - If no requests:
      - Maps by index: `shippingInfoGroups[i].shippingKey` → `calculations[i]`
-     - Logs warning about potential inaccuracy
+     - Logs a warning
      - Combines if duplicate shippingKey found
 
 3. **Return**:
@@ -591,18 +664,20 @@ The solution implements a multi-step transformation algorithm that:
 
 2. **Request Mapping**:
    - Uses `requests[i].shippingKey` to map to `calculations[i]`
-   - Reliable when requests are provided
+   - Used for shipping actions only; line-item actions use the metadata strategy
 
 3. **ShippingInfoGroups Index** (Fallback):
    - Maps by array index: `shippingInfoGroups[i].shippingKey`
-   - Less reliable, used only when metadata/requests unavailable
-   - Logs warning about potential inaccuracy
+   - Used only when metadata/requests unavailable
+   - Logs a warning
 
 ### Duplicate Handling Rules
 
 **When Duplicates Occur**:
-- Same `lineItemId` + `shippingKey` combination appears in multiple calculations
-- Can happen when line items are split across multiple ship-from groups or shipping methods
+- The same `lineItemId` + `shippingKey` combination would appear in multiple calculations
+- As the requests are built today, a line item belongs to exactly one ship-from group, and within it appears
+  once per shipping key it targets, so the same `lineItemId` + `shippingKey` does not reach two calculations
+  (`tax-calculator/src/services/tax-orchestrator.service.js:175-191`, `:309-322`). The merge is defensive.
 
 **Combination Logic**:
 1. **Combine Tax Amounts**:
@@ -675,6 +750,11 @@ The solution implements a multi-step transformation algorithm that:
 - No calculation found for shippingKey
 
 **Zero Tax Action Structure**:
+
+`totalGross.centAmount` is the shipping amount (tax 0, so gross = net) —
+`tax-calculator/src/services/update-action.service.js:951`. In Multiple mode the `country` is
+`destinationCountryOf(calculation)` (`:956`).
+
 ```javascript
 {
   action: "setShippingMethodTaxAmount",
@@ -682,7 +762,7 @@ The solution implements a multi-step transformation algorithm that:
   externalTaxAmount: {
     totalGross: {
       currencyCode: currency,
-      centAmount: 0
+      centAmount: shippingAmount
     },
     taxRate: {
       name: 'no_shipping_tax',
@@ -715,63 +795,11 @@ return {
 };
 ```
 
-### Update Actions Structure
-
-```javascript
-[
-  // Cart custom type action
-  {
-    action: "setCustomType",
-    type: { key: "connector-stripe-tax-calculation-reference", typeId: "type" },
-    fields: {
-      connectorStripeTax_calculationReferences: ["calc_123", "calc_456"],
-      connectorStripeTax_amountTotal: 10000,
-      // ... other metadata fields
-    }
-  },
-  
-  // Line item tax actions
-  {
-    action: "setLineItemTaxAmount",
-    lineItemId: "line-item-1",
-    shippingKey: "shipping-key-1", // Only in Multiple mode
-    externalTaxAmount: {
-      totalGross: {
-        currencyCode: "USD",
-        centAmount: 800
-      },
-      taxRate: {
-        name: "sales_tax",
-        amount: 0.08,
-        country: "US"
-      }
-    }
-  },
-  
-  // Shipping tax action
-  {
-    action: "setShippingMethodTaxAmount",
-    shippingKey: "shipping-key-1", // Only in Multiple mode
-    externalTaxAmount: {
-      totalGross: {
-        currencyCode: "USD",
-        centAmount: 100
-      },
-      taxRate: {
-        name: "shipping_tax",
-        amount: 0.08,
-        country: "US"
-      }
-    }
-  }
-]
-```
-
 ## Technical Notes
 
 ### Performance Considerations
 
-- **Selective Combination**: Only combines calculations for metadata, preserving individual precision
+- **Selective Combination**: Combines calculations for metadata, preserving individual precision for line items and shipping
 - **Efficient Mapping**: Uses Maps for O(1) lookups when mapping shipping keys
 - **Direct Processing**: Processes calculations individually to avoid precision loss
 - **Duplicate Detection**: Uses Map-based grouping for efficient duplicate handling
@@ -789,10 +817,10 @@ return {
 ### Logging and Debugging
 
 - **Action Creation Logging**: Logs count of actions created
-- **Tax Breakdown Matching**: Logs when breakdowns are found with strategy used
-- **Duplicate Combination**: Logs when duplicates are combined
-- **Warning Logging**: Logs warnings for missing breakdowns or inaccurate mappings
-- **Error Logging**: Comprehensive error logging with context
+- **Tax Breakdown Matching** and **Duplicate Combination**: not logged; only a missing breakdown is
+  (`tax-calculator/src/services/update-action.service.js:369-413`, `:754-838`, `:710`)
+- **Warning Logging**: Logs warnings for missing breakdowns
+- **Error Logging**: Error logging with context
 
 ## Configuration Requirements
 
@@ -808,6 +836,8 @@ return {
      - `connectorStripeTax_currencies` (Array of Strings)
      - `connectorStripeTax_expiresAt` (Array of Strings)
      - `connectorStripeTax_calculationTimestamp` (String)
+     - `connectorStripeTax_destinationCountry` (String) — post-deploy adds it to every existing `order` type
+       (`tax-calculator/src/connectors/customTypes.js:22`; `process-deploy-and-undeploy.md`)
 
 2. **Line Item Tax Actions**:
    - Requires `setLineItemTaxAmount` action support
@@ -827,7 +857,9 @@ No environment variables are required for this functionality. The service uses t
 - `process-category-taxcode-selection.md`: Tax code selection for products
 - `process-ship-from-selection.md`: Ship-from address selection
 - `process-shipping-taxcode-selection.md`: Shipping tax code selection
-- `ship-from-tax-calculation-flow.md`: Complete tax calculation flow
+- `process-tax-orchestration.md`: Complete tax calculation flow
+- `process-stored-calculation-reapply.md`: the re-apply path, which reuses
+  `createLineItemActionsFromCalculation`, `createShippingTaxUpdateAction` and `createCartTotalTaxAction`
 
 ## Summary
 
@@ -846,4 +878,3 @@ The process of update action creation is a comprehensive transformation system t
 11. **Supports both modes** (Single and Multiple shipping modes) appropriately
 
 This system ensures accurate, precise, and maintainable transformation of Stripe tax calculations into commercetools cart update actions, handling complex scenarios with multiple calculations, shipping methods, and tax breakdowns.
-

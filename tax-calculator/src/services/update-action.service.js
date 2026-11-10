@@ -220,9 +220,9 @@ class UpdateActionService {
    * Summarise the destinations a calculation was made for, read back from the requests actually
    * sent to Stripe rather than from the cart — so the record cannot disagree with what was asked.
    *
-   * Stored on the cart so a later re-apply can tell whether the stored calculation still belongs
-   * to where the order is going. A cart carrying a calculation but no destination was calculated
-   * before SB3-218 and is recalculated rather than trusted.
+   * Written to the cart as an INFORMATIONAL record only. Since SB3-238 (ADR-012) the re-apply
+   * decision no longer reads this field — it is shopper-writable through the My Carts API — and
+   * instead reads the destination from the retrieved calculation's own customer_details.address.
    *
    * @param {Array} requests - Stripe requests
    * @returns {string} Sorted, comma-separated destination countries; empty if none are known

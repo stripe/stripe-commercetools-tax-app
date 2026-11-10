@@ -13,11 +13,9 @@ tagged.
 
 ### Added
 
-- Re-apply path for carts whose `taxedPrice` was cleared after a payment was attached.
-  commercetools clears the taxed price on certain cart mutations even when `paymentInfo` is
-  already set, which previously left such carts permanently untaxed. The extension now re-applies
-  the *existing* Stripe Tax calculation by id rather than creating a new one, keeping the
-  PaymentIntent, the cart and the order-syncer on the same `calculationId`.
+- Re-apply path for carts whose `taxedPrice` was cleared after a payment was attached. The
+  extension re-applies the *existing* Stripe Tax calculation by id rather than creating a new one,
+  keeping the PaymentIntent, the cart and the order-syncer on the same `calculationId`.
 - Tax transaction handling for orders carrying several calculation references, not just one.
 - Non-blocking async logger; log output reduced and given structured metadata.
 
@@ -33,18 +31,7 @@ tagged.
 
 ### Security
 
-- **The tax destination now comes from the delivery address, not from `cart.country`.** The
-  address sent to Stripe Tax was assembled from two different cart fields: street, city and postal
-  code from the delivery address, but the country from `cart.country` — a price-selection field
-  that a shopper can set themselves. Since that country selects the tax jurisdiction, a shopper
-  could move the sale to another jurisdiction while the goods still went to the original address,
-  and the connector wrote the resulting total back to the cart as the payable amount. The same
-  field also selected the inclusive/exclusive tax behavior, and in Multiple shipping mode it
-  overrode *every* destination — so a cart legitimately delivering to two countries was taxed as
-  if both went to one, with no attacker involved.
-
-  Reported as CTT-002; CWE-840, CVSS 6.5 Medium. See
-  `context/decisions/adr-007-tax-destination-country.md`.
+- **The tax destination now comes from the delivery address, not from `cart.country`.**
 
   **Action required for merchants using `TAX_BEHAVIOR_COUNTRY_MAPPING`:** the mapping is now
   keyed on where an order is **delivered**, not on the cart's price-selection country. If it was
@@ -62,25 +49,17 @@ tagged.
 ### Fixed
 
 - `order-syncer` now reads the Pub/Sub topic and project from `CONNECT_GCP_TOPIC_NAME` and
-  `CONNECT_GCP_PROJECT_ID` — the names commercetools Connect actually injects at runtime. It
-  previously read `CONNECT_SUBSCRIPTION_TOPIC_NAME` and `CONNECT_SUBSCRIPTION_PROJECT_ID`, which
-  Connect never populates, so `properties.get()` returned `undefined` and post-deploy could not
-  create the subscription at all. This is a fix, not a migration: the two values are injected by
-  Connect rather than declared in `connect.yaml`, so there is no merchant configuration to change.
-  Deployments built before 2025-12-04 never had a working order sync.
+  `CONNECT_GCP_PROJECT_ID` — the names commercetools Connect actually injects at runtime. This is
+  a fix, not a migration: the two values are injected by Connect rather than declared in
+  `connect.yaml`, so there is no merchant configuration to change.
 - Shipping cost now follows the same resolved tax behavior as line items — country mapping, then
-  merchant default, then Stripe's own default. It was hardcoded to `exclusive`, so for countries
-  configured as `inclusive` the line items and the shipping line disagreed in the cart total.
+  merchant default, then Stripe's own default.
 - Tax calculation is skipped for carts that already carry `paymentInfo` (outside the re-apply
   case above), and the `order-syncer` JSON body limit was raised to 1 MB.
 - Address validation failures return HTTP 400 instead of a success status.
-- Missing `.js` extension on imports in `decoder.util`, which broke ES module resolution.
+- Missing `.js` extension on imports in `decoder.util`, for ES module resolution.
 - Zero-tax update actions are labelled with the destination the calculation was made for, read
-  back from the calculation itself, instead of falling back to `cart.country`. These actions
-  always carry an amount of zero, so no amount was ever wrong, but the `taxRate.country` written
-  to the cart could name the shopper's price-selection country rather than the delivery
-  jurisdiction — the last three places in `update-action.service.js` still reasoning from
-  `cart.country` after the destination fix above.
+  back from the calculation itself, instead of falling back to `cart.country`.
 
 ### Security
 
@@ -89,11 +68,26 @@ tagged.
 
 ### Documentation
 
-- ADR-006 records the tax code resolution strategy — no default code, a missing code fails the
-  cart update — which had been decided and implemented in October 2025 without being written down.
-- `tax-calculator/README.md` no longer advertises a "5-strategy hierarchy" for tax code
-  resolution. Only the category-custom-field scan is active; the other three strategies are
-  commented out in `tax-code.service.js`.
+- Documented the tax code resolution strategy — no default code, a missing code fails the cart
+  update — which had been decided and implemented in October 2025 without being written down.
+
+## [1.2.1] - 2026-11-09
+
+### Changed
+
+- Documentation and maintenance updates.
+
+### Fixed
+
+- Bump qs to 6.17.1 to resolve a moderate denial-of-service advisory
+- Make `commercetools connect validate` pass — vendor the parity fixture per module, bump body-parser
+- Order tax sync now retries when provider credentials are rejected, declines malformed calculation references, files duplicate references only once, and logs orders carrying more than 100 references for manual filing.
+- Order tax sync now retries after a temporary provider error so the sale is filed on redelivery, binds each calculation in multiple-shipment orders to its own shipment, and falls back to the order's country as the delivery destination when the order carries no delivery address.
+- When syncing an order's tax to the provider, each stored calculation reference is verified to belong to that order — matching the order's cart and delivery destination — before it is filed; references that do not match are skipped, and an existing tax transaction is adopted only when it belongs to the order.
+- A stored tax calculation is re-applied only when it was produced for the current cart, and destination-mismatch log entries now record country codes only.
+- Destination comparison for re-applying a stored calculation now ignores letter case and surrounding whitespace, so cosmetically different addresses no longer force an extra calculation, and the lookup of a stored calculation is time-bounded.
+- After payment, a stored tax calculation is recalculated only when the provider reports it missing; a temporary failure retrieving it is reported as an error instead of re-using a stored result.
+- After payment, a stored tax calculation is re-applied only when the destination recorded in that calculation matches the cart's destination at country, state, city and postal-code level; any difference triggers a fresh calculation.
 
 ## [1.2] — 2025-12-01
 

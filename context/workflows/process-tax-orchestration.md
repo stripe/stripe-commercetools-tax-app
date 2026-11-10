@@ -1,5 +1,73 @@
 # Process Tax Orchestration
 
+**Trigger:** commercetools calls the API extension `ctpTaxCalculatorExtension` (`POST /taxCalculator`)
+on a cart `Create` or `Update` that matches the trigger condition (`tax-calculator/src/connectors/action.js:27-33`;
+`business-rules/tax-calculation.md` Rule 2, *Extension trigger filters on tax mode, line items, change set, and payment state*), and the request is **not** a re-apply — `isReapplyScenario()`
+is false (`tax-calculator/src/controllers/tax.calculator.controller.js:12-23`). The re-apply branch is
+`process-stored-calculation-reapply.md`.
+**Modules involved:** tax-calculator — `tax.calculator.controller.js`, `tax-orchestrator.service.js`, and the
+sub-flows `process-tax-behavior-determination.md`, `process-category-retrieval.md`,
+`process-category-taxcode-selection.md`, `process-ship-from-selection.md`,
+`process-shipping-taxcode-selection.md`, `process-update-action-creation.md`. Rules:
+`business-rules/tax-calculation.md`, `business-rules/tax-destination.md`, `business-rules/calculation-requests.md`,
+`business-rules/error-responses.md`.
+**Outcome:** HTTP 200 `{ actions }` — the constant is named `HTTP_STATUS_SUCCESS_ACCEPTED` but its value is
+200 (`tax-calculator/src/constants/http.status.constants.js:1`). commercetools applies, in this order,
+`setCustomType`, `setLineItemTotalPrice`, `setLineItemTaxAmount`, `setShippingMethodTaxAmount`,
+`setCartTotalTax` (`business-rules/tax-calculation.md` Rule 3, *Update action ordering is mandatory*). One new Stripe Tax calculation exists per
+request built; the service never writes the cart itself.
+
+## Happy Path
+
+1. The cart is read from `request.body.resource.obj` — `tax-calculator/src/controllers/tax.calculator.controller.js:27`
+2. Not a re-apply → `orchestrateTaxCalculation(cart)` — `tax-calculator/src/controllers/tax.calculator.controller.js:43`, `:66-68`
+3. The destination country is resolved from the delivery address; `cart.country` is used only when the cart
+   has no delivery address at all — `tax-calculator/src/services/tax-orchestrator.service.js:42`, `:529-559`
+4. One tax behavior is resolved for that destination and assigned to every line item —
+   `tax-calculator/src/services/tax-orchestrator.service.js:43-44` (`process-tax-behavior-determination.md`)
+5. Categories of the current (published) product projections are fetched, cached 5 minutes —
+   `tax-calculator/src/services/tax-orchestrator.service.js:58-69` (`process-category-retrieval.md`)
+6. Ship-from is resolved per line item in parallel, then line items are grouped by origin —
+   `tax-calculator/src/services/tax-orchestrator.service.js:169-193` (`process-ship-from-selection.md`)
+7. When `SHIP_FROM_REQUIRED === 'true'`, every group must carry a ship-from country —
+   `tax-calculator/src/services/tax-orchestrator.service.js:196-198`, `:805-814`
+8. Requests are built, group by group, sequentially — `tax-calculator/src/services/tax-orchestrator.service.js:143-159`:
+   - `shippingMode === 'Single'` → one request per group — `tax-calculator/src/services/tax-orchestrator.service.js:214-216`, `:231-292`
+   - any other mode → one request per group × `cart.shipping` entry, skipping a request with neither line
+     items nor shipping cost — `tax-calculator/src/services/tax-orchestrator.service.js:220`, `:303-337`
+9. Each line item gets its category tax code — `tax-calculator/src/services/tax-orchestrator.service.js:261`, `:461`
+   (`process-category-taxcode-selection.md`)
+10. The shipping cost, with the shipping method's tax code, is added only when its price is non-zero —
+    `tax-calculator/src/services/tax-orchestrator.service.js:275-289`, `:414-426`, `:481-510`
+    (`process-shipping-taxcode-selection.md`)
+11. All requests are sent in parallel with `Promise.allSettled` → `tax.calculations.create`, after stripping the
+    internal `shippingKey` — `tax-calculator/src/services/tax-orchestrator.service.js:641-654`
+12. Update actions are built from the **successful** calculations only —
+    `tax-calculator/src/services/tax-orchestrator.service.js:656`, `:104-109` (`process-update-action-creation.md`)
+13. The handler answers 200 `{ actions }` — `tax-calculator/src/controllers/tax.calculator.controller.js:70`
+
+## Error Paths
+
+| Condition | Behavior | File |
+| --- | --- | --- |
+| No cart in the body | 400, serialised `CustomError` | `tax-calculator/src/controllers/tax.calculator.controller.js:28-40` |
+| Delivery address locates the order (city, postal code, street, state or line1) but has no country | 400 `InvalidInput` (`InvalidTaxDestinationError`), before any Stripe call | `tax-calculator/src/services/tax-orchestrator.service.js:607-618`; `tax-calculator/src/services/tax-error-handler.service.js:30-32` |
+| A line item has no category tax code | 400 `InvalidInput`; the **whole cart** is refused, no Stripe call made | `tax-calculator/src/services/tax-code.service.js:65-69`; `tax-calculator/src/services/tax-error-handler.service.js:35-37` |
+| Required mode and a resolved ship-from address has no country | 400 `InvalidInput` (`ShipFromNotFoundError`), see `process-ship-from-selection.md` | `tax-calculator/src/services/tax-orchestrator.service.js:805-814`; `tax-calculator/src/services/tax-error-handler.service.js:25-27` |
+| Channel or inventory lookup fails | caught → next ship-from source, default address, or no ship-from | `tax-calculator/src/services/ship-from.service.js:111-114`, `:161-164` |
+| Category query (≤ 500 products) or shipping-method fetch fails | re-thrown; answered with the SDK error's `statusCode`, else 500 | `tax-calculator/src/services/category.service.js:104-110`; `tax-calculator/src/services/tax-code.service.js:305-311`; `tax-calculator/src/services/tax-error-handler.service.js:213-217` |
+| All Stripe requests fail, or no request was built | 500 (`business-rules/error-responses.md` Rule 2) | `tax-calculator/src/services/tax-orchestrator.service.js:671-673`; `tax-calculator/src/services/tax-error-handler.service.js:45`, `:213-217` |
+| No response within 2000 ms | the platform's extension timeout rejects the cart update (`business-rules/tax-calculation.md` Rule 1, *The extension must respond within 2 seconds*) | `tax-calculator/src/connectors/action.js:34` |
+
+## Notes
+
+- **Mode differences.** Single mode sends every line item of the group, including zero-amount ones, and one
+  unkeyed shipping cost. Multiple mode sends a line item only for the shipping keys it targets, split by
+  target quantity, and drops a split whose amount is 0 (`tax-calculator/src/services/tax-orchestrator.service.js:408`,
+  `:444-446`).
+
+---
+
 ## Description
 
 The process of tax orchestration is the main coordination mechanism implemented in the tax-orchestrator service. This system orchestrates the complete tax calculation flow by integrating multiple specialized services to determine tax behavior, retrieve product categories, resolve ship-from addresses, create Stripe tax calculation requests, execute calculations in parallel, and transform results into commercetools update actions.
@@ -74,7 +142,7 @@ The solution implements a sequential orchestration algorithm that:
                         ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  STEP 1: Determine Tax Behavior                                  │
-│  taxBehaviorService.determineTaxBehaviorForCart(cart)            │
+│  taxBehaviorService.determineTaxBehaviorForCart(cart, dest.)     │
 │  - Determines cart-level tax behavior (inclusive/exclusive)     │
 │  - Applied to all line items                                     │
 └───────────────────────┬─────────────────────────────────────────┘
@@ -165,7 +233,7 @@ The solution implements a sequential orchestration algorithm that:
 
 #### Step 1: Determine Tax Behavior for Cart
 
-**Service**: `TaxBehaviorService.determineTaxBehaviorForCart(cart)`
+**Service**: `TaxBehaviorService.determineTaxBehaviorForCart(cart, destinationCountry)`
 
 **Process**:
 
@@ -190,7 +258,7 @@ The solution implements a sequential orchestration algorithm that:
    - Tax behavior is added to each line item in Stripe requests
    - Shipping cost carries the **same** behavior as the line items it ships, resolved from that
      request's destination — never a hardcoded value. See `business-rules/tax-calculation.md`
-     Rule 6.
+     Rule 6, *Shipping tax behavior follows the same resolved behavior as line items*.
 
 **Related Documentation**: See `process-tax-behavior-determination.md` for detailed tax behavior determination process.
 
@@ -206,7 +274,7 @@ The solution implements a sequential orchestration algorithm that:
 
 2. **Fetch Categories**:
    - Calls category service to fetch categories from commercetools API
-   - Uses Product Projections API with full expansion
+   - Uses Product Projections API with `categories[*]` expansion only
    - Options:
      - `staged: false` (current version)
      - `locale: cart.locale` (if available)
@@ -214,7 +282,7 @@ The solution implements a sequential orchestration algorithm that:
 
 3. **Return Categories Map**:
    - Returns `Map<productId, Array<Category>>`
-   - Each category includes custom fields and parent hierarchy
+   - Each category includes its custom fields and a `parent` **reference** — not the expanded parent
 
 4. **Integration**:
    - Categories are used by tax code service to determine product tax codes
@@ -247,8 +315,8 @@ The solution implements a sequential orchestration algorithm that:
      - `lineItems`: Array of line items with this address
 
 4. **Validation** (if `SHIP_FROM_REQUIRED='true'`):
-   - Validates that all groups have valid ship-from addresses
-   - Throws `ShipFromNotFoundError` if any group lacks address
+   - Validates that every group's ship-from address has a country
+   - Throws `ShipFromNotFoundError` if any group's address has no country (`tax-calculator/src/services/tax-orchestrator.service.js:806-809`)
 
 5. **Return Groups**:
    - Returns array of ship-from groups
@@ -411,7 +479,8 @@ const proportionalAmount = Math.round((totalAmount * target.quantity) / totalQua
    - `cart`: Original commercetools cart
 
 2. **Action Creation** (in order):
-   - **Step 1**: Combines calculations for cart metadata (custom type fields only)
+   - **Step 1**: Combines calculations for cart metadata — and, in Single mode, for the shipping action and,
+     in both modes, for the cart total
    - **Step 2**: Creates cart custom type update action with combined metadata
    - **Step 3a**: Creates line item total price actions (`setLineItemTotalPrice`) - REQUIRED for ExternalAmount mode
    - **Step 3b**: Creates line item tax update actions (`setLineItemTaxAmount`) with shipping key mapping
@@ -453,7 +522,7 @@ The orchestrator integrates the following services:
 4. **TaxCodeService**:
    - Determines tax codes for products (from categories)
    - Determines tax codes for shipping methods
-   - Uses hierarchical category search
+   - Reads the custom field of the product's **directly assigned** categories only — first match wins
 
 5. **UpdateActionService**:
    - Transforms Stripe calculations into commercetools actions
@@ -510,7 +579,7 @@ The orchestrator integrates the following services:
    ```javascript
    {
      shipFromAddress: StripeAddress,
-     source: 'lineItem.supplyChannel' | 'inventory.supplyChannel' | 'default_business' | 'not_required',
+     source: 'lineItem.supplyChannel' | 'inventory.supplyChannel' | 'default_business' | 'not_required' | 'error_fallback',
      lineItems: Array<LineItem>
    }
    ```
@@ -527,8 +596,7 @@ The orchestrator integrates the following services:
 1. **Required Fields**:
    - `customer_details.address`: **the delivery address, in full — country included.** Stripe
      treats this as "the customer's location, or transaction destination", so its country selects
-     the tax jurisdiction. It is never assembled from more than one cart field: see
-     [ADR-007](../decisions/adr-007-tax-destination-country.md).
+     the tax jurisdiction. It is never assembled from more than one cart field.
    - `line_items`: Array of line items with tax codes
    - `currency`: Cart currency code
 
@@ -689,7 +757,7 @@ const cart = {
 
 ### Edge Cases Handled
 
-- **Empty Carts**: Handles carts with no line items gracefully
+- **Empty Carts**: The extension trigger requires `lineItems` to be non-empty.
 - **Missing Ship-From**: Handles optional ship-from mode (returns null addresses)
 - **Required Ship-From**: Validates ship-from when `SHIP_FROM_REQUIRED='true'`
 - **Failed Calculations**: Continues with successful calculations using Promise.allSettled
@@ -697,7 +765,6 @@ const cart = {
 - **Missing Categories**: Handles products without categories (tax code service throws error)
 - **Missing Tax Codes**: Tax code service throws error if no tax code found
 - **Empty Shipping Methods**: Filters out empty requests in Multiple mode
-- **Proportional Rounding**: Handles rounding errors in proportional calculations
 
 ### Logging and Debugging
 
@@ -719,14 +786,13 @@ const cart = {
    - Stops orchestration, requires configuration fix
 
 2. **ShipFromNotFoundError**:
-   - Thrown when ship-from required but not found
+   - Thrown when a ship-from group's address has no country (`tax-calculator/src/services/tax-orchestrator.service.js:806-809`)
    - Only when `SHIP_FROM_REQUIRED='true'`
 
 3. **InvalidTaxDestinationError**:
    - Thrown when the delivery address names a city, postal code or street but no country
    - Stops orchestration; mapped to a commercetools `InvalidInput` 400 naming the offending
-     shipping method. The address is refused rather than completed from `cart.country` — see
-     `../decisions/adr-007-tax-destination-country.md`
+     shipping method. The address is refused rather than completed from `cart.country`.
    - An entirely absent delivery address is **not** an error: the request falls back to
      `cart.country` as a country-only address
 
@@ -744,7 +810,9 @@ const cart = {
 
 1. **SHIP_FROM_REQUIRED** (optional):
    - Values: `'true'` or any other value
-   - When `'true'`: Ship-from is required, validates all groups have addresses
+   - When `'true'`: an item no channel or inventory entry places gets the default business address
+     (`tax-calculator/src/services/ship-from.service.js:57-59`), and the validation checks that every
+     group's address has a country (`tax-calculator/src/services/tax-orchestrator.service.js:806-809`)
    - When not `'true'`: Ship-from is optional, allows null addresses
 
 ### commercetools Setup
@@ -769,7 +837,7 @@ const cart = {
      taxed where its goods actually go.
    - Line items must have `shippingDetails.targets` for proportional splitting
 
-4. **Destination Requirements** (SB3-218):
+4. **Destination Requirements**:
    - A delivery address that is present must carry its own `country`. commercetools requires it
      on every Address, so an address naming a city, postal code or street without one cannot
      arrive through the cart API — it is rejected with a commercetools `InvalidInput` error
@@ -795,6 +863,10 @@ const cart = {
 - `process-ship-from-selection.md`: Ship-from address resolution process
 - `process-shipping-taxcode-selection.md`: Shipping tax code selection process
 - `process-update-action-creation.md`: Update action creation from calculations
+- `process-stored-calculation-reapply.md`: the other branch of the same handler — a cart with payment
+  attached whose tax was cleared
+- `process-order-tax-transaction-sync.md`: what `order-syncer` later does with the calculation references
+  this flow writes
 
 ## Summary
 

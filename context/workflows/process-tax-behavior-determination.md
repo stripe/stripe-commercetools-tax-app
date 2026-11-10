@@ -1,5 +1,51 @@
 # Process Tax Behavior Determination
 
+**Trigger:** step 4 of `process-tax-orchestration.md` — `determineTaxBehaviorForCart(cart, destinationCountry)`
+once for the cart's destination (`tax-calculator/src/services/tax-orchestrator.service.js:42-44`), and again in
+Multiple mode for each shipping entry whose destination differs from the cart's
+(`tax-calculator/src/services/tax-orchestrator.service.js:315-318`).
+**Modules involved:** tax-calculator — `tax-behavior.service.js`, `utils/config.util.js`,
+`constants/tax-behavior.constants.js`. Rules: `business-rules/tax-behavior.md` Rules 1–5,
+`business-rules/tax-calculation.md` Rule 6, *Shipping tax behavior follows the same resolved behavior as line items*, `business-rules/tax-destination.md` Rule 4, *Tax behavior is resolved from the same destination the provider is told*.
+**Outcome:** `{ lineItemId: 'inclusive' | 'exclusive' | null }`, one value for every line item of the cart. It
+is copied onto each request line item and onto that request's shipping cost; `null` means the field is
+omitted.
+
+## Happy Path
+
+1. The destination is the country of the address Stripe will be sent — `tax-calculator/src/services/tax-orchestrator.service.js:572-574`
+2. Country mapping: `TAX_BEHAVIOR_COUNTRY_MAPPING[destination.toUpperCase()]`, if it is a valid value —
+   `tax-calculator/src/services/tax-behavior.service.js:81-98`, `:122-143`
+3. Else `TAX_BEHAVIOR_DEFAULT`, if valid — `tax-calculator/src/services/tax-behavior.service.js:57-62`, `:103-117`
+4. Else `null` — `tax-calculator/src/services/tax-behavior.service.js:64-66`
+5. The same value is assigned to every line item of the cart — `tax-calculator/src/services/tax-behavior.service.js:33-36`
+6. It is set on request line items and shipping cost only when non-null —
+   `tax-calculator/src/services/tax-orchestrator.service.js:265-269`, `:285-288`, `:422-425`, `:466-469`
+
+## Error Paths
+
+| Condition | Behavior | File |
+| --- | --- | --- |
+| Mapping JSON unparsable, or an array | Rejected by `readConfiguration()`; behavior is `null`, and the cart update fails elsewhere | `tax-calculator/src/validators/env-var.validators.js:63-67`; `tax-calculator/src/validators/helpers.validators.js:156-171`; `tax-calculator/src/utils/config.util.js:27-33`; `tax-calculator/src/services/tax-behavior.service.js:138-142` |
+| A mapping value is not `inclusive` / `exclusive` | Ignored → next priority | `tax-calculator/src/services/tax-behavior.service.js:90-92` |
+| `TAX_BEHAVIOR_DEFAULT` set but not `inclusive` / `exclusive` (in any case) | Rejected by `readConfiguration()`; the country mapping is lost too, behavior is `null`, and the cart update fails elsewhere | `tax-calculator/src/validators/env-var.validators.js:57-61`; `tax-calculator/src/utils/config.util.js:27-33`; `tax-calculator/src/services/tax-behavior.service.js:138-142` |
+| Configuration invalid — `readConfiguration()` throws | Behavior `null` here (warning); the same configuration then fails the cart update elsewhere (category query, Stripe client) | `tax-calculator/src/services/tax-behavior.service.js:93-95`, `:111-113`, `:157`; `tax-calculator/src/utils/config.util.js:27-33` |
+
+## Notes
+
+- **On a default deploy the `null` path is not reached.** `connect.yaml` ships `TAX_BEHAVIOR_DEFAULT='exclusive'`
+  and a nine-country mapping (`connect.yaml:26-31`).
+- **A cart with no delivery address is keyed on `cart.country`**, because that is then the destination
+  (`tax-calculator/src/services/tax-orchestrator.service.js:552`). "No destination" in this
+  document means neither exists.
+- **Mapping keys must be written in upper case.** Only the looked-up code is upper-cased; a `"de"` key never
+  matches (`tax-calculator/src/services/tax-behavior.service.js:88`).
+- **Stripe's account default behavior never reaches the running service.** Post-deploy copies it into
+  `process.env.TAX_BEHAVIOR_DEFAULT` inside the post-deploy process only
+  (`tax-calculator/src/validators/stripeTaxValidator.js:72-77`).
+
+---
+
 ## Description
 
 The process of tax behavior determination is a priority-based configuration mechanism implemented in the tax behavior service. This system automatically determines whether taxes should be calculated as inclusive or exclusive for cart line items based on country-specific mappings and merchant-wide default configurations.
@@ -7,15 +53,6 @@ The process of tax behavior determination is a priority-based configuration mech
 The process is designed to handle e-commerce scenarios where different countries or regions require different tax calculation behaviors. The solution uses a priority-based fallback logic: first checking country-specific mappings, then falling back to merchant-wide defaults, and finally allowing Stripe to use its own default behavior if no configuration is found.
 
 **Main Flow**: The system determines tax behavior **per destination** — the country the goods are delivered to — and applies it to the line items of that destination's Stripe request. The determination follows a priority order: (1) country-based behavior from configuration mapping, keyed on the destination, (2) merchant-wide default configuration, and (3) null (letting Stripe use its default behavior).
-
-> **Amended 2026-09-17 (SB3-218).** This document previously described the behavior as resolved
-> "once at the cart level" from `cart.country`. That was the defect, not a simplification:
-> `cart.country` selects catalog prices and is shopper-controlled, so keying the behavior on it
-> let a shopper force `inclusive` on a price published as exclusive — under which Stripe keeps the
-> customer's total constant and the merchant remits the tax from their own margin. Resolution is
-> now keyed on the delivery destination, and a cart delivering to several countries resolves one
-> behavior per destination. Where sections below still say "cart-level", read "per destination".
-> See `../decisions/adr-007-tax-destination-country.md`.
 
 ## Problem
 
@@ -133,10 +170,11 @@ The solution implements a priority-based determination algorithm that:
 
 #### Step 1: Entry Point - Determine Tax Behavior for Cart
 
-**Method**: `TaxBehaviorService.determineTaxBehaviorForCart(cartRequest)`
+**Method**: `TaxBehaviorService.determineTaxBehaviorForCart(cartRequest, destinationCountry)`
 
 **Parameters**:
 - `cartRequest`: commercetools cart request object
+- `destinationCountry`: the delivery country (default `null`)
 
 **Process**:
 
@@ -152,13 +190,6 @@ The solution implements a priority-based determination algorithm that:
 3. **Return**:
    - Returns map: `{lineItemId: taxBehavior}` where all values are the same
 
-**Code Example**:
-```javascript
-const taxBehaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
-// Result: { "line-item-1": "inclusive", "line-item-2": "inclusive", ... }
-// All line items have the same behavior
-```
-
 #### Step 2: Determine Cart Tax Behavior
 
 **Method**: `TaxBehaviorService.determineCartTaxBehavior(cartContext, destinationCountry)`
@@ -172,7 +203,8 @@ const taxBehaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
 1. **Priority 1: Country-Based Behavior**:
    - Calls `getCountryBasedBehavior(destinationCountry)`
    - If found and valid, returns the country-specific behavior immediately
-   - Logs: `"Using country-based tax behavior for country {country}: {behavior}"`
+   - Logs (debug): `"Using country-based tax behavior for destination {destinationCountry}: {behavior}"`
+     (`tax-calculator/src/services/tax-behavior.service.js:53`)
 
 2. **Priority 2: Merchant-Wide Default**:
    - If country-based behavior not found, calls `getMerchantDefaultBehavior()`
@@ -202,9 +234,6 @@ const taxBehaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
 
 1. **Country Code**:
    - Takes the destination country code directly, rather than a cart to read a country off.
-     The signature is deliberate: a caller has to be explicit about *which* country it means,
-     and that ambiguity — "the country", without saying which of the cart's two — is what
-     produced SB3-218.
    - Returns `null` if the country code is missing. With no destination there is no
      destination-based rule, so resolution falls through to the merchant default and then to the
      account's own Stripe Tax setting.
@@ -279,12 +308,14 @@ taxBehaviorDefault: "inclusive" // or "exclusive"
    - Caches parsed result for future use
 
 4. **Error Handling**:
-   - Returns empty object `{}` if parsing fails
+   - Returns empty object `{}` if reading the configuration throws; an unparsable mapping is one cause,
+     because `readConfiguration()` rejects it before `JSON.parse` here sees it
+     (`tax-calculator/src/validators/env-var.validators.js:63-67`, `tax-calculator/src/services/tax-behavior.service.js:129`)
    - Logs warning if error occurs
 
 5. **Return**:
    - Returns parsed mapping object: `{ "US": "exclusive", ... }`
-   - Returns empty object if not configured or parsing fails
+   - Returns empty object if not configured or the configuration cannot be read
 
 #### Step 6: Get Cached Configuration
 
@@ -297,7 +328,9 @@ taxBehaviorDefault: "inclusive" // or "exclusive"
    - Returns cached configuration if valid
 
 2. **Configuration Read**:
-   - Calls `configUtils.readConfiguration()` to read configuration from file/environment
+   - Calls `configUtils.readConfiguration()` to read configuration from environment variables only;
+     it reads `process.env` and validates it, and throws when any variable — commercetools credentials
+     included — is invalid (`tax-calculator/src/utils/config.util.js:12-36`)
    - Caches configuration object with current timestamp
 
 3. **Return**:
@@ -340,6 +373,10 @@ VALID_TAX_BEHAVIORS = ["inclusive", "exclusive"]
 - When `tax_behavior` is set to `"inclusive"`, Stripe calculates tax assuming the amount already includes tax
 - When `tax_behavior` is set to `"exclusive"`, Stripe calculates tax to be added to the amount
 - When `tax_behavior` is `null` or not provided, Stripe uses its own default behavior
+- The connector never sends `null` — it omits the field
+  (`tax-calculator/src/services/tax-orchestrator.service.js:266-269`) — and the default that then applies is
+  the account's own Stripe Tax setting, per the service's own note
+  (`tax-calculator/src/services/tax-behavior.service.js:73-76`)
 
 ### Priority-Based Fallback Logic
 
@@ -364,20 +401,8 @@ Return null (Stripe default)
 **Rationale**:
 - Tax behavior is a property of the jurisdiction the goods are delivered to, so it has to be resolved where that is known
 - A Single-mode cart has one destination, so this reduces to one resolution and one code path — the common case is unchanged
-- A Multiple-mode cart may deliver to several countries. Resolving once per cart meant a shipment to Berlin and a shipment to New York shared one behavior; now each gets its own, and so does its shipping line (`business-rules/tax-calculation.md` Rule 6)
+- A Multiple-mode cart may deliver to several countries; each destination resolves its own behavior, and so does its shipping line (`business-rules/tax-calculation.md` Rule 6, *Shipping tax behavior follows the same resolved behavior as line items*)
 - `tax-orchestrator.service.js` recomputes only when a shipping method's destination differs from the cart's, so nothing extra happens for an ordinary single-destination cart
-
-**Implementation**:
-```javascript
-// Determine once
-const cartTaxBehavior = determineCartTaxBehavior(cart);
-
-// Apply to all line items
-const lineItemBehaviors = {};
-for (const lineItem of cart.lineItems) {
-  lineItemBehaviors[lineItem.id] = cartTaxBehavior;
-}
-```
 
 ### Configuration Caching Strategy
 
@@ -407,7 +432,7 @@ for (const lineItem of cart.lineItems) {
 
 **Configuration Utility**:
 - Uses `configUtils.readConfiguration()` to read configuration
-- Supports environment variables and configuration files
+- Supports environment variables only (`tax-calculator/src/utils/config.util.js:12-23`)
 - Returns configuration object with properties:
   - `taxBehaviorDefault`: Merchant-wide default tax behavior
   - `countryTaxBehaviorMapping`: JSON string of country-to-behavior mapping
@@ -415,73 +440,6 @@ for (const lineItem of cart.lineItems) {
 **Environment Variables**:
 - `TAX_BEHAVIOR_DEFAULT`: Merchant-wide default (e.g., `"inclusive"` or `"exclusive"`)
 - `TAX_BEHAVIOR_COUNTRY_MAPPING`: JSON string (e.g., `'{"US":"exclusive","GB":"inclusive"}'`)
-
-## Usage Example
-
-### Complete Flow Example
-
-```javascript
-// 1. Tax Orchestrator determines tax behavior
-const taxBehaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
-
-// 2. Result structure
-// {
-//   "line-item-1": "inclusive",
-//   "line-item-2": "inclusive",
-//   "line-item-3": "inclusive"
-// }
-// All line items have the same behavior
-
-// 3. Use in Stripe request
-for (const lineItem of cart.lineItems) {
-  const taxBehavior = taxBehaviors[lineItem.id];
-  
-  lineItemData.tax_behavior = taxBehavior; // "inclusive", "exclusive", or null
-  taxRequest.line_items.push(lineItemData);
-}
-```
-
-### Country Mapping Example
-
-```javascript
-// Configuration: TAX_BEHAVIOR_COUNTRY_MAPPING
-{
-  "US": "exclusive",  // US uses exclusive tax
-  "GB": "inclusive", // UK uses inclusive tax
-  "AU": "exclusive", // Australia uses exclusive tax
-  "CA": "inclusive"  // Canada uses inclusive tax
-}
-
-// Cart with country "US"
-const cart = { country: "US", lineItems: [...] };
-const behaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
-// Result: { "line-item-1": "exclusive", "line-item-2": "exclusive", ... }
-```
-
-### Merchant Default Example
-
-```javascript
-// Configuration: TAX_BEHAVIOR_DEFAULT = "inclusive"
-// No country mapping configured
-
-// Cart with country "FR" (not in mapping)
-const cart = { country: "FR", lineItems: [...] };
-const behaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
-// Result: { "line-item-1": "inclusive", "line-item-2": "inclusive", ... }
-// Uses merchant default
-```
-
-### Stripe Default Example
-
-```javascript
-// No configuration at all (no country mapping, no merchant default)
-
-// Cart with country "DE"
-const cart = { country: "DE", lineItems: [...] };
-const behaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
-// Result: { "line-item-1": null, "line-item-2": null, ... }
-// Returns null, letting Stripe use its default behavior
-```
 
 ## Technical Notes
 
@@ -496,8 +454,10 @@ const behaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
 ### Edge Cases Handled
 
 - **Missing Country**: Returns null if country code is missing (falls back to merchant default or Stripe default)
-- **Invalid Behavior Values**: Validates behavior values and ignores invalid ones
-- **JSON Parse Errors**: Handles JSON parsing errors gracefully, returns empty object
+- **Invalid Behavior Values**: An invalid value inside the country mapping is ignored; an invalid
+  `TAX_BEHAVIOR_DEFAULT` is not — it invalidates the whole configuration (see Error Paths)
+- **JSON Parse Errors**: An unparsable mapping is rejected by `readConfiguration()`, which invalidates the
+  whole configuration (see Error Paths); it is not a local parse error
 - **Configuration Read Errors**: Logs warnings and continues with fallback logic
 - **Cache Expiration**: Automatically invalidates cache after 5 minutes
 - **Empty Configuration**: Returns null when no configuration is provided (lets Stripe decide)
@@ -508,7 +468,8 @@ const behaviors = taxBehaviorService.determineTaxBehaviorForCart(cart);
 - **Decision Logging**: Logs which priority level was used (country mapping, merchant default, or Stripe default)
 - **Configuration Warnings**: Logs warnings when configuration read or parsing fails
 - **Behavior Assignment**: Logs tax behavior assignment with product ID, variant ID, and decision reason
-- **Cache Operations**: Logs cache hits and misses for performance analysis
+  (once per cart, for the first line item, at debug level — `tax-calculator/src/services/tax-orchestrator.service.js:53-55`)
+- **Cache Operations**: not logged
 - **Audit Trail**: Maintains timestamp and decision reason for each tax behavior determination
 
 ### API Integration Details
@@ -537,7 +498,9 @@ POST /v1/tax/calculations
 **Tax Behavior Impact**:
 - `"inclusive"`: Stripe assumes the amount already includes tax and calculates the tax portion
 - `"exclusive"`: Stripe calculates tax to be added to the amount
-- `null` or omitted: Stripe uses its own default behavior based on jurisdiction
+- `null` or omitted: Stripe uses its own default behavior — the account's Stripe Tax setting, which on
+  "Automatic" is currency-based (per `tax-calculator/src/services/tax-behavior.service.js:73-76`). The
+  connector omits the field rather than sending `null`.
 
 ## Configuration Requirements
 
@@ -555,18 +518,6 @@ POST /v1/tax/calculations
    - Example: `TAX_BEHAVIOR_COUNTRY_MAPPING='{"US":"exclusive","GB":"inclusive"}'`
    - Used as highest priority (checked first)
 
-### Configuration File (Alternative)
-
-If using configuration files instead of environment variables:
-
-```javascript
-// config.json or similar
-{
-  "taxBehaviorDefault": "inclusive",
-  "countryTaxBehaviorMapping": "{\"US\":\"exclusive\",\"GB\":\"inclusive\"}"
-}
-```
-
 ### Valid Tax Behavior Values
 
 **Allowed Values**:
@@ -580,7 +531,8 @@ If using configuration files instead of environment variables:
 ## Related Documentation
 
 - `process-tax-orchestration.md`: Complete tax calculation flow that uses tax behavior service
-- `process-update-action-creation.md`: Update action creation that includes tax behavior in calculations
+- `process-update-action-creation.md`: Update action creation from the resulting calculations (it does not
+  read the tax behavior)
 - Tax behavior constants: `tax-calculator/src/constants/tax-behavior.constants.js`
 - Configuration utility: `tax-calculator/src/utils/config.util.js`
 
@@ -597,4 +549,3 @@ The process of tax behavior determination is a robust priority-based system that
 7. **Handles edge cases** including missing configuration, invalid values, and parsing errors
 
 This system ensures flexible, efficient, and maintainable tax behavior configuration for e-commerce platforms. The priority-based approach provides country-specific customization while maintaining merchant-wide defaults and graceful degradation to Stripe's default behavior when no configuration is provided.
-

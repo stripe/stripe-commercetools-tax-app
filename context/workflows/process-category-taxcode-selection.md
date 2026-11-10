@@ -1,10 +1,42 @@
 # Process Category Tax Code Selection
 
+**Trigger:** step 9 of `process-tax-orchestration.md` — for every line item placed in a Stripe request,
+`taxCodeService.getTaxCodeForProduct(lineItem, categoriesMap.get(lineItem.productId) || [])`. Single mode
+calls it once per line item (`tax-calculator/src/services/tax-orchestrator.service.js:261`); Multiple mode
+once per line item and targeted shipping key (`tax-calculator/src/services/tax-orchestrator.service.js:461`).
+**Modules involved:** tax-calculator — `tax-code.service.js`, `errors/taxCodeNotFound.error.js`,
+`tax-error-handler.service.js`. Rules: `business-rules/tax-code-resolution.md`.
+**Outcome:** the first `connectorStripeTax_TaxCode` value found on a **directly assigned** category, sent as
+the line item's `tax_code` exactly as stored. When none is found, the whole cart update is refused with
+400 `InvalidInput` before any Stripe call.
+
+## Happy Path
+
+1. A line item is required — `tax-calculator/src/services/tax-code.service.js:31-33`
+2. Strategy 1: the product's categories are scanned in order and the first truthy
+   `custom.fields.connectorStripeTax_TaxCode` wins — `tax-calculator/src/services/tax-code.service.js:37-41`, `:94-111`
+3. The code is placed on the request line item as `tax_code` —
+   `tax-calculator/src/services/tax-orchestrator.service.js:261`, `:461`
+
+## Error Paths
+
+| Condition | Behavior | File |
+| --- | --- | --- |
+| No directly assigned category carries the field — including a product with no categories | `TaxCodeNotFoundError` → 400 `InvalidInput` for the **whole cart**, before any Stripe call | `tax-calculator/src/services/tax-code.service.js:65-69`; `tax-calculator/src/services/tax-error-handler.service.js:35-37`, `:92-100` |
+| The stored value is not a valid Stripe tax code | forwarded unchanged; Stripe rejects that request, which surfaces as a partial failure (200) or, if every request fails, a 500 | `tax-calculator/src/services/tax-code.service.js:104-106`; `tax-calculator/src/services/tax-orchestrator.service.js:656-673` |
+
+## Notes
+
+- An edit to a category's tax code reaches calculations only after the category cache expires — 5 minutes
+  (`process-category-retrieval.md`).
+
+---
+
 ## Description
 
 The process of tax code selection within product categories is a direct tax code resolution mechanism implemented in the tax-calculator service. This system automatically determines the appropriate Stripe tax code for products by searching through the categories directly assigned to the product, checking each category's custom fields for a configured tax code.
 
-The process is designed to handle e-commerce scenarios where products can belong to multiple categories simultaneously, and tax codes are defined at the category level. The solution uses a "first-found" approach, returning the first tax code encountered in the categories assigned to the product, ensuring efficient and predictable tax code assignment.
+The process handles e-commerce scenarios where products can belong to multiple categories simultaneously, and tax codes are defined at the category level. The solution uses a "first-found" approach, returning the first tax code encountered in the categories assigned to the product, ensuring efficient and predictable tax code assignment.
 
 **Main Flow**: The system first obtains product category information through the commercetools API using Product Projections with expansion of categories and their custom types. Then, it applies the main strategy (STRATEGY 1) to search for the tax code in category custom fields, checking only the categories directly assigned to the product (no parent hierarchy traversal).
 
@@ -45,7 +77,6 @@ The solution implements a direct category search algorithm that:
 - **First-Found Logic**: Returns the first tax code found in the category order (first-found approach)
 - **Category Custom Field Integration**: Direct integration with commercetools category custom type fields
 - **Category Caching**: In-memory cache system to optimize multiple category queries
-- **Comprehensive Logging**: Detailed audit trail for tax code decisions and source tracking
 
 ## Solution Diagram
 
@@ -62,8 +93,7 @@ The solution implements a direct category search algorithm that:
 │                                                                   │
 │  - Extract product IDs from cart line items                      │
 │  - Query Product Projections API                                │
-│  - Expand: categories[*], categories[*].custom,                 │
-│    categories[*].parent, categories[*].parent.custom            │
+│  - Expand: categories[*]  (only)                                 │
 │  - Cache results (5 min TTL)                                    │
 └───────────────────────┬─────────────────────────────────────────┘
                         │
@@ -153,18 +183,17 @@ The solution implements a direct category search algorithm that:
      - `where`: Filter by product IDs (`id in ("id1", "id2", ...)`)
      - `staged`: Staged or current version (default: false = current)
      - `locale`: Locale for projections (only included when provided)
-     - `expand`: Category expansion — `['categories[*]']` only. Parent and nested `custom` paths are NOT expanded; the active flow does not require them because `getCustomTypeCategoryTaxCode` only inspects each direct category's `custom.fields`.
+     - `expand`: Category expansion — `['categories[*]']` only. Parent and nested `custom` paths are not expanded; the active flow does not require them because `getCustomTypeCategoryTaxCode` only inspects each direct category's `custom.fields`.
      - `limit`: Maximum 500 products per query
 
 4. **Batch Handling**:
-   - If there are more than 500 products, divides into batches of 500
-   - Executes batches in parallel using `Promise.allSettled()`
-   - Combines results from all batches
+   - If there are more than 500 products, divides into batches of 500 and executes them in parallel
 
 5. **Category Extraction**:
    - For each Product Projection, extracts expanded categories
    - Creates a Map where `key = productId`, `value = Array<Category>`
-   - Each category includes: `id`, `key`, `name`, `custom.fields`, `parent` (expanded)
+   - Each category includes: `id`, `key`, `name`, `custom.fields`, `parent` (a reference, **not** expanded —
+     `tax-calculator/src/services/category.service.js:135-137`)
 
 6. **Cache Storage**:
    - Saves the complete Map to cache with timestamp
@@ -200,20 +229,10 @@ const categoriesMap = await categoryService.getCategoriesForProducts(
 
 2. **STRATEGY 1: Check Category Custom Type** (Main Flow):
    - Calls `getCustomTypeCategoryTaxCode(productCategories)`
-   - If tax code is found:
-     - Logs the decision with `logTaxCodeDecision()`
-     - Returns the found tax code
+   - If a tax code is found, returns it
 
-3. **Additional Strategies** (Commented, available for future use):
-   - **STRATEGY 2**: Check product custom field
-   - **STRATEGY 3**: Look up category in customer's mapping
-   - **STRATEGY 4**: Traverse parent categories using mapping
-
-4. **Error Handling**:
-   - If no tax code is found, throws `TaxCodeNotFoundError` with:
-     - Product ID and name
-     - All categories assigned to the product
-     - Actionable error messages for configuration
+3. **Error Handling**:
+   - If no tax code is found, throws `TaxCodeNotFoundError` carrying the product ID and an actionable error message for configuration (`tax-calculator/src/services/tax-code.service.js:65-69`)
 
 #### Step 3: STRATEGY 1 - Check Category Custom Type (Main Flow)
 
@@ -267,50 +286,20 @@ Product assigned to:
 Result: "txcd_12345678" (returned from Category B)
 ```
 
-**Note**: The method `findFirstTaxCodeInHierarchy()` exists in the codebase but is not currently used in the main flow. The current implementation only checks categories directly assigned to the product.
-
 #### Step 5: Error Handling
 
 **Class**: `TaxCodeNotFoundError`
 
 **When Thrown**:
-- When no tax code is found through any strategy
+- When no tax code is found
 - When the product has no categories assigned
-- When no category in the hierarchy has a tax code configured
+- When no **directly assigned** category has a tax code configured; no parent is consulted
+  (`tax-calculator/src/services/tax-code.service.js:94-111`)
 
 **Error Information**:
-- Product ID and product name
-- All categories assigned to the product (IDs, keys, names)
-- Actionable error messages for configuration
+- Product ID
+- Actionable error message for configuration
 - Format compatible with commercetools API for error responses
-
-**Error Example**:
-```javascript
-throw new TaxCodeNotFoundError(
-  cartLineItem.productId,
-  cartLineItem.name || 'Unknown Product',
-  cartLineItem.categories || []
-);
-```
-
-## Other Strategies (Brief Description)
-
-Although currently only STRATEGY 1 is active, the code includes other commented strategies that can be activated in the future:
-
-### STRATEGY 2: Check Product Custom Field
-**Description**: Searches for the tax code directly in product or variant custom fields. Checks `lineItem.custom.fields` and `lineItem.variant.custom.fields` for the `connectorStripeTax_TaxCode` field.
-
-**Use**: Useful when specific tax codes need to be assigned to individual products without depending on categories.
-
-### STRATEGY 3: Look Up Category in Customer's Mapping
-**Description**: Searches for the tax code in a customer configuration mapping. Uses `taxCodeMappingConfig.getTaxCodeForCategory()` to look up predefined tax codes by category ID or key.
-
-**Use**: Allows configuring tax codes through configuration files without modifying categories in commercetools.
-
-### STRATEGY 4: Traverse Parent Categories Using Mapping
-**Description**: Similar to STRATEGY 1, but uses configuration mapping instead of custom fields. Traverses the parent hierarchy searching for tax codes in the configuration mapping.
-
-**Use**: Alternative to STRATEGY 1 when preferring external configuration over custom fields.
 
 ## Implementation Details
 
@@ -368,7 +357,7 @@ expand: [
 ]
 ```
 
-Only `categories[*]` is requested. Nested expansions (`categories[*].custom`, `categories[*].parent`, `categories[*].parent.custom`) are NOT used because `tax-code.service.js → getCustomTypeCategoryTaxCode` only reads `category.custom.fields.connectorStripeTax_TaxCode` on each directly assigned category — no parent traversal happens in the active flow.
+Only `categories[*]` is requested. Nested expansions (`categories[*].custom`, `categories[*].parent`, `categories[*].parent.custom`) are not used because `tax-code.service.js → getCustomTypeCategoryTaxCode` only reads `category.custom.fields.connectorStripeTax_TaxCode` on each directly assigned category — no parent traversal happens in the active flow.
 
 ### Caching Strategy
 
@@ -416,6 +405,9 @@ for (const lineItem of cart.lineItems) {
 
 ### Category Structure Example
 
+The active query does not expand parents, so `parent` is a reference —
+`tax-calculator/src/services/category.service.js:135-137`.
+
 ```javascript
 // Example of expanded category from commercetools
 {
@@ -429,21 +421,7 @@ for (const lineItem of cart.lineItems) {
       connectorStripeTax_TaxCode: "txcd_12345678"
     }
   },
-  parent: {
-    obj: {
-      id: "category-456",
-      key: "products",
-      name: {
-        en: "Products"
-      },
-      custom: {
-        fields: {
-          connectorStripeTax_TaxCode: null // No tiene tax code
-        }
-      },
-      parent: null // Categoría raíz
-    }
-  }
+  parent: { typeId: "category", id: "category-456" }
 }
 ```
 
@@ -452,28 +430,22 @@ for (const lineItem of cart.lineItems) {
 ### Performance Considerations
 
 - **First Match**: The algorithm stops at the first match, minimizing traversal depth
-- **Processed Categories Set**: Prevents redundant processing
-- **Depth Limit**: Ensures predictable execution time
 - **No Additional API Calls**: Uses pre-loaded data during traversal
 - **Category Caching**: Reduces API calls for repeated products
-- **Batch Processing**: Efficiently handles more than 500 products by dividing into batches
 
 ### Edge Cases Handled
 
-- **Products without assigned categories**: Returns clear error indicating no categories
+- **Products without assigned categories**: Returns a `TaxCodeNotFoundError`
 - **Categories without parent references**: Correctly handles root categories
-- **Circular references in hierarchies**: Prevents infinite loops with processed Set
-- **Deep category trees**: Truncates after 10 levels
 - **Missing or malformed custom field data**: Safely handles null/undefined
-- **Products not found in API**: Returns empty Map for those products
-- **API batch failures**: Uses `Promise.allSettled()` to continue with successful batches
+- **Products not found in API**: absent from the Map; the orchestrator substitutes `[]`, so the cart is
+  refused with `TaxCodeNotFoundError` (`tax-calculator/src/services/tax-orchestrator.service.js:261`)
 
 ### Logging and Debugging
 
-- **Comprehensive Logging**: Detailed logging at each decision point
-- **Tax Code Source Tracking**: Identifies which category provided the tax code
-- **Detailed Error Messages**: Include complete category information for troubleshooting
-- **Audit Trail**: Maintains timestamp and category details for each tax code assignment
+- **Logging**: a debug line on entry and a warning when no code is found
+  (`tax-calculator/src/services/tax-code.service.js:30`, `:73-76`)
+- **Error Messages**: carry the product id
 - **Cache Logging**: Records cache hits and misses for performance analysis
 
 ### API Integration Details
@@ -487,7 +459,7 @@ GET /{projectKey}/product-projections
 - `where`: Filter by product IDs
 - `staged`: Staged or current version
 - `locale`: Locale for projections
-- `expand`: Expansion of categories and parents
+- `expand`: `categories[*]` only
 - `limit`: Maximum 500 results per query
 
 **Response Structure**:
@@ -512,7 +484,9 @@ GET /{projectKey}/product-projections
 ### commercetools Setup
 
 1. **Custom Type for Categories**:
-   - Create custom type with key: `connector-stripe-tax-category`
+   - Create custom type with key: `connector-stripe-tax-category` (the default; overridable with
+     `CUSTOM_TYPE_CATEGORY_KEY` — `tax-calculator/src/connectors/customTypes.js:58`). Post-deploy creates it
+     (`process-deploy-and-undeploy.md`)
    - Add field: `connectorStripeTax_TaxCode` (String, optional)
    - Assign to resource type: `category`
 
@@ -521,8 +495,8 @@ GET /{projectKey}/product-projections
    - Format: `txcd_XXXXXXXX` (Stripe tax code format)
 
 3. **Category Structure**:
-   - Ensure parent-child relationships are correctly configured
-   - Categories must have `parent` reference when applicable
+   - The active flow does not read parents, so a tax code set only on a parent category is **not** inherited —
+     the product's directly assigned category must carry it
 
 ### Environment Variables
 
@@ -530,20 +504,19 @@ No additional environment variables are required for this functionality. It uses
 
 ## Related Documentation
 
-- `process-category-selection.md`: Detailed documentation of the category selection algorithm
-- `ship-from-tax-calculation-flow.md`: Complete tax calculation flow
-- `proportional-shipping-calculation.md`: Proportional shipping calculation
+- `process-category-retrieval.md`: Detailed documentation of the category retrieval
+- `process-tax-orchestration.md`: Complete tax calculation flow, including the proportional split of line
+  items across shipping methods
 
 ## Summary
 
-The process of tax code selection within product categories is a robust system that:
+The process of tax code selection within product categories is a system that:
 
 1. **Retrieves categories** from commercetools API using Product Projections with category expansion
 2. **Applies STRATEGY 1** as the main flow, searching for tax codes in category custom fields
 3. **Checks direct categories** only - searches through categories directly assigned to the product (no parent hierarchy traversal)
 4. **Returns the first tax code found** using a first-found approach
-5. **Optimizes performance** with caching and batch processing
+5. **Optimizes performance** with caching
 6. **Provides clear errors** when no tax code is found in any assigned category
 
-This system ensures efficient, predictable, and maintainable tax code assignment for products in e-commerce platforms. The direct category search approach provides simplicity and performance while requiring tax codes to be configured at the category level where products are directly assigned.
-
+This system provides tax code assignment for products in e-commerce platforms. The direct category search approach provides simplicity and performance while requiring tax codes to be configured at the category level where products are directly assigned.

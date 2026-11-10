@@ -1,5 +1,44 @@
 # Process Ship-From Selection
 
+**Trigger:** step 6 of `process-tax-orchestration.md` — `groupLineItemsByShipFrom(cart)` calls
+`shipFromService.resolveAllShipFromAddresses(cart.lineItems)` (`tax-calculator/src/services/tax-orchestrator.service.js:169-173`).
+**Modules involved:** tax-calculator — `ship-from.service.js`, the grouping and validation in
+`tax-orchestrator.service.js`, `errors/shipFromNotFoundError.js`. Rules: `business-rules/ship-from.md` Rules 1–8.
+**Outcome:** one `{ address, source }` per line item (a Stripe-format address, or `null`), then groups of line
+items keyed by origin. Each group's address becomes `ship_from_details.address` on its request(s), and the
+field is omitted when the address is `null`.
+
+## Happy Path
+
+1. All line items are resolved in parallel with `Promise.all` — `tax-calculator/src/services/ship-from.service.js:23-29`
+2. Source 1 — the line item's `supplyChannel`: the channel's address, cached 5 minutes per channel id —
+   `tax-calculator/src/services/ship-from.service.js:39-44`, `:87-115`
+3. Source 2 — inventory for `variant.sku`, supply channels expanded; only entries with an address **and**
+   `availableQuantity > 0` count; the first match in `SHIP_FROM_CHANNEL_PRIORITY` order wins, else the
+   highest stock — `tax-calculator/src/services/ship-from.service.js:47-52`, `:122-165`, `:172-208`
+4. Source 3 — only when `SHIP_FROM_REQUIRED === 'true'`: the default business address from
+   `SHIP_FROM_DEFAULT_BUSINESS_*`, each field falling back to a hard-coded New York value —
+   `tax-calculator/src/services/ship-from.service.js:57-60`, `:229-238`
+5. Otherwise `{ address: null, source: 'not_required' }` — `tax-calculator/src/services/ship-from.service.js:63`
+6. Line items are grouped by `{ country, state, city, postal_code }`, or `'no_ship_from'` —
+   `tax-calculator/src/services/tax-orchestrator.service.js:175-193`, `:785-797`
+7. Required mode: every group must have an address with a country —
+   `tax-calculator/src/services/tax-orchestrator.service.js:196-198`, `:805-814`
+8. `ship_from_details` is set only when the group has an address —
+   `tax-calculator/src/services/tax-orchestrator.service.js:244-248`, `:377-381`
+
+## Notes
+
+- Unset, `SHIP_FROM_REQUIRED` means optional (`tax-calculator/src/services/ship-from.service.js:57`);
+  `connect.yaml` deploys it as `'true'` (`connect.yaml:35-37`). Only the exact string `'true'` turns it on.
+- **Channel addresses are cached, and only when found.** The channel address is cached with a 5-minute TTL;
+  inventory lookups are not cached and run on every cart
+  (`tax-calculator/src/services/ship-from.service.js:87-115`, `:122-133`).
+- **Address mapping**: `streetName` → `line1` and `streetNumber` → `line2`
+  (`tax-calculator/src/services/ship-from.service.js:251-252`).
+
+---
+
 ## Description
 
 The process of ship-from address selection is a hierarchical address resolution mechanism implemented in the ship-from service. This system automatically determines the appropriate ship-from address for line items by searching through multiple data sources using a fallback strategy, ensuring accurate tax calculations based on the origin location of products.
@@ -53,8 +92,6 @@ The solution implements a priority-based fallback algorithm that:
 - **Address Format Conversion**: Automatic conversion from commercetools to Stripe address format
 - **Optional/Required Modes**: Supports both required and optional ship-from scenarios via `SHIP_FROM_REQUIRED` environment variable
 - **Parallel Processing**: Resolves addresses for multiple line items in parallel for performance
-- **Comprehensive Logging**: Detailed audit trail for address resolution decisions and source tracking
-- **Error Resilience**: Graceful error handling that doesn't break the flow when ship-from is optional
 
 ## Solution Diagram
 
@@ -144,8 +181,8 @@ The solution implements a priority-based fallback algorithm that:
 1. **Parallel Resolution**: The Tax Orchestrator Service calls `resolveAllShipFromAddresses()` to resolve addresses for all line items in parallel
 2. **Entry Point**: For each line item, `resolveShipFromForLineItem(lineItem)` is called
 3. **STRATEGY 1**: Attempts to get address from line item's supply channel using commercetools Channel API
-4. **STRATEGY 2**: If STRATEGY 1 fails, searches inventory entries for the product SKU and selects optimal channel
-5. **STRATEGY 3**: If STRATEGY 2 fails and ship-from is required, uses default business address from environment variables
+4. **STRATEGY 2**: If STRATEGY 1 finds nothing, searches inventory entries for the product SKU and selects optimal channel
+5. **STRATEGY 3**: If STRATEGY 2 finds nothing and ship-from is required, uses default business address from environment variables
 6. **Optional Mode**: If ship-from is optional and no address is found, returns null
 7. **Result**: Returns address with source information, or null if optional and not found
 
@@ -192,34 +229,19 @@ const shipFromResults = await shipFromService.resolveAllShipFromAddresses(cart.l
 1. **STRATEGY 1: Line Item supplyChannel** (Highest Priority):
    - Checks if `lineItem.supplyChannel?.id` exists
    - If yes, calls `getAddressFromChannelId(channelId)`
-   - If address found:
-     - Logs resolution with source: `'lineItem.supplyChannel'`
-     - Returns `{ address, source: 'lineItem.supplyChannel' }`
+   - If address found, returns `{ address, source: 'lineItem.supplyChannel' }`
 
 2. **STRATEGY 2: Inventory Entry supplyChannel** (Dropshipping Case):
    - Checks if `lineItem.variant?.sku` exists
    - If yes, calls `getAddressFromInventory(sku)`
-   - If address found:
-     - Logs resolution with source: `'inventory.supplyChannel'`
-     - Returns `{ address, source: 'inventory.supplyChannel' }`
+   - If address found, returns `{ address, source: 'inventory.supplyChannel' }`
 
 3. **STRATEGY 3: Default Business Address** (Lowest Priority):
    - Checks if `process.env.SHIP_FROM_REQUIRED === 'true'`
-   - If required:
-     - Calls `getDefaultBusinessAddress()`
-     - Logs resolution with source: `'default_business'`
-     - Returns `{ address, source: 'default_business' }`
+   - If required, calls `getDefaultBusinessAddress()` and returns `{ address, source: 'default_business' }`
 
 4. **Optional Mode**:
-   - If `SHIP_FROM_REQUIRED !== 'true'`:
-     - Logs that ship-from is not resolved (optional mode)
-     - Returns `{ address: null, source: 'not_required' }`
-
-5. **Error Handling**:
-   - If error occurs and ship-from is optional:
-     - Logs warning and returns `{ address: null, source: 'error_fallback' }`
-   - If error occurs and ship-from is required:
-     - Throws error to be handled by caller
+   - If `SHIP_FROM_REQUIRED !== 'true'`, returns `{ address: null, source: 'not_required' }`
 
 #### Step 3: STRATEGY 1 - Get Address from Channel ID
 
@@ -384,7 +406,6 @@ const prioritizedChannels = process.env.SHIP_FROM_CHANNEL_PRIORITY
 **Conversion Rules**:
 - Handles both commercetools formats (snake_case and camelCase)
 - Provides fallback for field name variations
-- Ensures all required Stripe fields are present
 
 #### Step 8: Caching Strategy
 
@@ -415,8 +436,10 @@ const prioritizedChannels = process.env.SHIP_FROM_CHANNEL_PRIORITY
 **Required Configuration**:
 
 1. **SHIP_FROM_REQUIRED** (optional):
-   - Values: `'true'` or any other value (default: optional mode)
-   - When `'true'`: Ship-from is required, throws error if not found
+   - Values: `'true'` or any other value (default: optional mode when unset in code; `connect.yaml` deploys
+     `'true'` — `connect.yaml:35-37`)
+   - When `'true'`: Ship-from is required; the default business address (with its New York fallbacks) ends the
+     chain (`tax-calculator/src/services/ship-from.service.js:57-60`, `:229-237`)
    - When not `'true'`: Ship-from is optional, returns null if not found
 
 2. **SHIP_FROM_CHANNEL_PRIORITY** (optional):
@@ -462,26 +485,6 @@ Within STRATEGY 2, channel selection follows this order:
    - Fallback when no priority match
    - Selects channel with highest available quantity
    - Ensures optimal stock utilization
-
-### Error Handling
-
-**Error Scenarios**:
-
-1. **API Errors**:
-   - Channel API errors: Returns `null`, logs warning
-   - Inventory API errors: Returns `null`, logs warning
-   - Non-fatal errors don't break the flow
-
-2. **Required Mode Errors**:
-   - If `SHIP_FROM_REQUIRED='true'` and no address found:
-     - Throws error to be handled by caller
-     - Prevents tax calculation without ship-from
-
-3. **Optional Mode Errors**:
-   - If `SHIP_FROM_REQUIRED !== 'true'` and error occurs:
-     - Returns `{ address: null, source: 'error_fallback' }`
-     - Logs warning but continues execution
-     - Allows tax calculation to proceed without ship-from
 
 ### Source Tracking
 
@@ -562,7 +565,8 @@ process.env.SHIP_FROM_CHANNEL_PRIORITY = "warehouse-west,warehouse-east,dropship
 - **Channel Caching**: 5-minute TTL reduces API calls for repeated channels
 - **Efficient Filtering**: Inventory entries filtered before channel selection
 - **Early Returns**: Stops at first successful strategy (priority-based)
-- **Minimal API Calls**: Only queries APIs when cache miss occurs
+- **API Calls**: the channel lookup is cached; the inventory lookup is not and runs on every cart
+  (`tax-calculator/src/services/ship-from.service.js:122-133`)
 
 ### Edge Cases Handled
 
@@ -577,9 +581,9 @@ process.env.SHIP_FROM_CHANNEL_PRIORITY = "warehouse-west,warehouse-east,dropship
 
 ### Logging and Debugging
 
-- **Resolution Logging**: Logs each successful resolution with source
+- **Resolution Logging**: none per resolution; the orchestrator logs the group sources at debug level
+  (`tax-calculator/src/services/tax-orchestrator.service.js:74-77`)
 - **Channel Selection Logging**: Logs selected channel and selection reason
-- **Cache Logging**: Logs cache hits and misses for performance analysis
 - **Error Logging**: Detailed error logging with context
 - **Source Tracking**: Each result includes source for audit trail
 
@@ -665,8 +669,8 @@ expand: supplyChannel
 
 ## Related Documentation
 
-- `ship-from-tax-calculation-flow.md`: Complete tax calculation flow with ship-from integration
-- `ship-from-detection-flow.md`: Detailed ship-from detection and grouping logic
+- `process-tax-orchestration.md`: Complete tax calculation flow with ship-from integration, including the
+  grouping logic (Ship-From Grouping Rules)
 - `process-category-taxcode-selection.md`: Tax code selection process documentation
 
 ## Summary
@@ -682,4 +686,3 @@ The process of ship-from address selection is a robust system that:
 7. **Provides clear source tracking** for audit and debugging purposes
 
 This system ensures efficient, predictable, and maintainable ship-from address resolution for accurate tax calculations in complex e-commerce platforms with multiple fulfillment locations.
-

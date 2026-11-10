@@ -1,12 +1,46 @@
 # Process Shipping Tax Code Selection
 
+**Trigger:** step 10 of `process-tax-orchestration.md`, and only when the shipping price is non-zero. Single
+mode: `getShippingCostForGroup(cart)`, once per ship-from group
+(`tax-calculator/src/services/tax-orchestrator.service.js:275`, `:481-492`). Multiple mode:
+`fetchShippingCostsMap(cart)`, for every `cart.shipping` entry, once per ship-from group
+(`tax-calculator/src/services/tax-orchestrator.service.js:304`, `:345-353`, `:499-510`).
+**Modules involved:** tax-calculator — `tax-code.service.js`. Rule: `business-rules/tax-code-resolution.md` Rule 4, *Shipping tax code comes from the shipping method, not from line item categories*.
+**Outcome:** the shipping method's `connectorStripeTax_TaxCode`, or `null`, placed in the request as
+`shipping_cost.tax_code` next to the amount and the resolved tax behavior. A `null` is sent as it is.
+
+## Happy Path
+
+1. A missing or zero shipping price means no shipping cost and no lookup —
+   `tax-calculator/src/services/tax-orchestrator.service.js:482-484`, `:500-502`
+2. The shipping method id is read from `shippingInfo.shippingMethod.id` —
+   `tax-calculator/src/services/tax-code.service.js:264`
+3. The shipping method comes from a 5-minute per-instance cache, else from
+   `GET /shipping-methods/{id}`, which is then cached — `tax-calculator/src/services/tax-code.service.js:279-304`
+4. A truthy custom field value is returned, else `null` — `tax-calculator/src/services/tax-code.service.js:266-271`
+5. It becomes `shipping_cost.tax_code` — `tax-calculator/src/services/tax-orchestrator.service.js:277-280`, `:416-419`
+
+## Error Paths
+
+| Condition | Behavior | File |
+| --- | --- | --- |
+| The fetch fails — 404, auth, network | logged and re-thrown; the cart update is answered with the SDK error's `statusCode`, else 500 | `tax-calculator/src/services/tax-code.service.js:305-311`; `tax-calculator/src/services/tax-error-handler.service.js:213-217` |
+| No custom type, or the field is empty | `null` → the request carries `tax_code: null` | `tax-calculator/src/services/tax-code.service.js:266-271`; `tax-calculator/src/services/tax-orchestrator.service.js:277-280` |
+
+## Notes
+
+- **A shipping method's tax-code edit reaches calculations after up to 5 minutes**, per instance
+  (`tax-calculator/src/services/tax-code.service.js:16-20`).
+
+---
+
 ## Description
 
 The process of shipping tax code selection is a direct resolution mechanism implemented in the tax-code service. This system automatically determines the appropriate Stripe tax code for shipping methods by retrieving the shipping method from commercetools API and checking its custom fields for a configured tax code.
 
-The process is designed to handle shipping tax code configuration where shipping methods can have tax codes assigned directly through custom fields. Unlike product tax codes, shipping tax codes use a single-strategy approach: the tax code is retrieved directly from the shipping method's custom fields after fetching the complete shipping method object from commercetools API.
+The process handles shipping tax code configuration where shipping methods can have tax codes assigned directly through custom fields. Shipping tax codes use a single-strategy approach: the tax code is retrieved directly from the shipping method's custom fields after fetching the complete shipping method object from commercetools API.
 
-**Main Flow**: The system receives shipping information from the cart (either from `cart.shippingInfo` for Single mode or `cart.shipping[].shippingInfo` for Multiple mode), extracts the shipping method ID, fetches the complete shipping method object from commercetools API (including custom fields), and retrieves the tax code from the custom field `connectorStripeTax_TaxCode`. If no tax code is configured, the system returns `null`, allowing the orchestrator to handle the absence of shipping tax code appropriately.
+**Main Flow**: The system receives shipping information from the cart (either from `cart.shippingInfo` for Single mode or `cart.shipping[].shippingInfo` for Multiple mode), extracts the shipping method ID, fetches the complete shipping method object from commercetools API (including custom fields), and retrieves the tax code from the custom field `connectorStripeTax_TaxCode`. If no tax code is configured, the system returns `null`, and the orchestrator copies it into the request unchanged as `shipping_cost.tax_code: null` (`tax-calculator/src/services/tax-orchestrator.service.js:277-280`, `:416-419`).
 
 ## Problem
 
@@ -21,15 +55,15 @@ The main challenges addressed by this solution include:
 
 1. **Custom Field Access**: Shipping method custom fields are not included in cart objects by default, requiring API calls to retrieve the complete shipping method object.
 
-2. **Single Strategy Requirement**: Unlike products, shipping methods have a single source of truth for tax codes (custom fields), requiring a straightforward resolution approach.
+2. **Single Strategy Requirement**: Shipping methods have a single source of truth for tax codes (custom fields), requiring a straightforward resolution approach.
 
-3. **API Integration**: The system must efficiently fetch shipping methods from commercetools API without excessive calls or processing time.
+3. **API Integration**: The system fetches shipping methods from commercetools API.
 
-4. **Optional Tax Codes**: Shipping tax codes are optional, and the system must handle cases where no tax code is configured gracefully.
+4. **Optional Tax Codes**: Shipping tax codes are optional, and the system handles cases where no tax code is configured.
 
-5. **Multiple Shipping Modes**: The system must work with both Single and Multiple shipping modes, where shipping methods are accessed differently.
+5. **Multiple Shipping Modes**: The system works with both Single and Multiple shipping modes, where shipping methods are accessed differently.
 
-6. **Error Handling**: The system must handle API errors gracefully without breaking the tax calculation flow.
+6. **Error Handling**: The system handles API errors without breaking the tax calculation flow.
 
 ## Solution Found
 
@@ -39,17 +73,16 @@ The solution implements a direct API-based resolution algorithm that:
 2. **Fetches shipping method from API**: Uses commercetools Shipping Method API to retrieve the complete shipping method object with custom fields
 3. **Checks custom fields**: Examines the shipping method's custom fields for the tax code field `connectorStripeTax_TaxCode`
 4. **Returns tax code or null**: Returns the tax code if found, or `null` if not configured
-5. **Handles errors gracefully**: Catches API errors and throws them appropriately for the orchestrator to handle
+5. **Propagates errors**: Catches API errors and throws them to the orchestrator
 
 ### Key Features
 
 - **Direct API Resolution**: Fetches shipping method from commercetools API to access custom fields
-- **Single Strategy Approach**: Simple, straightforward resolution without fallback strategies
+- **Single Strategy Approach**: Direct resolution without fallback strategies
 - **Custom Field Integration**: Direct integration with commercetools shipping method custom type fields
-- **Optional Tax Code Support**: Returns `null` when tax code is not configured, allowing orchestrator to handle appropriately
+- **Optional Tax Code Support**: Returns `null` when tax code is not configured
 - **Multiple Shipping Mode Support**: Works with both Single and Multiple shipping modes
-- **Comprehensive Error Handling**: Proper error handling for API failures
-- **Clear Return Values**: Returns tax code string or `null` for easy integration
+- **Clear Return Values**: Returns tax code string or `null`
 
 ## Solution Diagram
 
@@ -66,7 +99,7 @@ The solution implements a direct API-based resolution algorithm that:
         │                               │
         ▼                               ▼
 ┌───────────────────────┐   ┌───────────────────────┐
-│  shippingInfo         │   │  shipping[0]          │
+│  shippingInfo         │   │  shipping[n]          │
 │  .shippingMethod.id   │   │  .shippingInfo        │
 │                       │   │  .shippingMethod.id   │
 └───────────┬───────────┘   └───────────┬───────────┘
@@ -114,6 +147,9 @@ The solution implements a direct API-based resolution algorithm that:
     │ code string   │      │              │
     └───────────────┘      └───────────────┘
 ```
+
+In Multiple mode the lookup runs for every `cart.shipping` entry
+(`tax-calculator/src/services/tax-orchestrator.service.js:345-353`).
 
 ## Step-by-Step Solution Description
 
@@ -194,7 +230,6 @@ const taxCode = await taxCodeService.getShippingTaxCodeFromShippingInfo(shipping
    - If API call fails:
      - Logs error with shipping method ID and error message
      - Throws error to be handled by caller
-     - Prevents silent failures
 
 4. **Return**:
    - Returns complete shipping method object with custom fields
@@ -229,7 +264,7 @@ const taxCode = await taxCodeService.getShippingTaxCodeFromShippingInfo(shipping
      - `fields` is undefined
      - `connectorStripeTax_TaxCode` is not set
 
-2. **Tax Code Validation**:
+2. **Tax Code Check**:
    - Checks if tax code exists and is not empty
    - Tax code format: String (e.g., `"txcd_99999999"`)
 
@@ -286,12 +321,12 @@ const taxCode = shippingMethod?.custom?.fields?.connectorStripeTax_TaxCode;
 
 ### Single Strategy Approach
 
-Unlike product tax codes which use multiple fallback strategies, shipping tax codes use a single, direct approach:
+Shipping tax codes use a single, direct approach. The difference from product tax codes is the source of the code: categories for products, the shipping method for shipping.
 
 1. **No Fallback Strategies**: Shipping tax codes are retrieved only from shipping method custom fields
 2. **Direct Resolution**: Single API call to fetch shipping method and check custom field
 3. **Simple Logic**: No complex hierarchy traversal or multiple data sources
-4. **Optional by Design**: Returns `null` when not configured, allowing orchestrator to handle appropriately
+4. **Optional by Design**: Returns `null` when not configured
 
 ### API Integration Details
 
@@ -337,17 +372,11 @@ GET /{projectKey}/shipping-methods/{ID}
    - Shipping method not found: API returns 404, error is logged and thrown
    - Network errors: Error is logged and thrown
    - Authentication errors: Error is logged and thrown
-   - All API errors are propagated to caller for appropriate handling
+   - All API errors are propagated to caller for handling
 
 2. **Missing Custom Fields**:
    - If shipping method has no custom type: Returns `null`
    - If custom type exists but field is not set: Returns `null`
-   - Not treated as an error, handled gracefully
-
-3. **Invalid Tax Code Format**:
-   - System does not validate tax code format
-   - Returns whatever value is stored in custom field
-   - Validation should be done at configuration time
 
 ### Shipping Mode Support
 
@@ -400,101 +429,48 @@ for (const shipping of cart.shipping) {
 }
 ```
 
-## Usage Example
-
-### Single Shipping Mode Example
+## Usage
 
 ```javascript
-// 1. Get shipping info from cart
-const shippingInfo = cart.shippingInfo;
-
-// 2. Get shipping tax code
+// Single mode
 const taxCode = await taxCodeService.getShippingTaxCodeFromShippingInfo(
-  shippingInfo
+  cart.shippingInfo
 );
 
-// 3. Use tax code in Stripe request
-const stripeRequest = {
-  line_items: [...],
-  shipping_cost: {
-    amount: shippingInfo.price.centAmount,
-    currency: shippingInfo.price.currencyCode,
-    tax_code: taxCode // "txcd_99999999" or null
-  }
-};
-```
-
-### Multiple Shipping Mode Example
-
-```javascript
-// 1. Get shipping methods from cart
-const shippingMethods = cart.shipping;
-
-// 2. Get tax code for each shipping method
-for (const shipping of shippingMethods) {
+// Multiple mode - for each shipping method
+for (const shipping of cart.shipping) {
   const taxCode = await taxCodeService.getShippingTaxCodeFromShippingInfo(
     shipping.shippingInfo
   );
-  
-  // 3. Create separate Stripe request for each shipping method
-  const stripeRequest = {
-    line_items: [...],
-    shipping_cost: {
-      amount: shipping.shippingInfo.price.centAmount,
-      currency: shipping.shippingInfo.price.currencyCode,
-      tax_code: taxCode // "txcd_99999999" or null
-    }
-  };
 }
 ```
 
-### Complete Integration Example
-
-```javascript
-// In tax orchestrator service
-async buildShippingCost(cart, shippingInfo) {
-  // Get shipping tax code
-  const taxCode = await taxCodeService.getShippingTaxCodeFromShippingInfo(
-    shippingInfo
-  );
-  
-  // Build shipping cost object
-  const shippingCost = {
-    amount: shippingInfo.price.centAmount,
-    currency: shippingInfo.price.currencyCode
-  };
-  
-  // Add tax code if available
-  if (taxCode) {
-    shippingCost.tax_code = taxCode;
-  }
-  
-  return shippingCost;
-}
-```
+The orchestrator places the result as `shipping_cost.tax_code` in the request it sends:
+`{ amount, tax_code }` (plus `tax_behavior` when resolved), with `tax_code` possibly `null`
+(`tax-calculator/src/services/tax-orchestrator.service.js:275-289`, `:414-426`, `:481-510`).
 
 ## Technical Notes
 
 ### Performance Considerations
 
-- **Single API Call**: Only one API call per shipping method, no redundant queries
-- **No Caching**: Shipping methods are fetched on-demand (could be optimized with caching if needed)
+- **Single API Call**: Only one API call per shipping method
+- **Caching**: shipping methods are cached in memory for 5 minutes per instance
+  (`tax-calculator/src/services/tax-code.service.js:16-20`, `:279-304`)
 - **Direct Resolution**: No complex logic or multiple strategy checks
 - **Efficient Access**: Uses optional chaining for safe property access
 
 ### Edge Cases Handled
 
 - **Shipping method not found**: API error is thrown and handled by caller
-- **Missing custom type**: Returns `null` gracefully
-- **Missing custom field**: Returns `null` gracefully
-- **Empty tax code**: Returns empty string (should be validated at configuration)
-- **Invalid shipping info**: Handles undefined/null shipping info safely
-- **API failures**: Errors are logged and thrown for proper error handling
+- **Missing custom type**: Returns `null`
+- **Missing custom field**: Returns `null`
+- **Empty tax code**: Returns `null` — an empty string is falsy
+  (`tax-calculator/src/services/tax-code.service.js:267`)
+- **API failures**: Errors are logged and thrown for handling by the caller
 
 ### Logging and Debugging
 
 - **API Error Logging**: Detailed error logging with shipping method ID and error message
-- **No Success Logging**: Tax code retrieval is not logged (could be added for audit trail)
 - **Error Context**: Error logs include shipping method ID for troubleshooting
 
 ### API Integration Details
@@ -503,19 +479,21 @@ async buildShippingCost(cart, shippingInfo) {
 - commercetools cart objects do not automatically expand shipping method custom fields
 - Shipping method references in cart only contain ID and basic info
 - Custom fields must be fetched via separate API call
-- This is by design to keep cart objects lightweight
+- This keeps cart objects lightweight
 
 **API Call Optimization**:
-- Currently, each shipping method requires a separate API call
+- Each shipping method requires a separate API call
 - Could be optimized with batch fetching if multiple shipping methods are needed
-- Caching could be implemented to reduce API calls for frequently used shipping methods
+- Shipping methods are cached for 5 minutes, per instance
+  (`tax-calculator/src/services/tax-code.service.js:279-304`)
 
 ## Configuration Requirements
 
 ### commercetools Setup
 
 1. **Custom Type for Shipping Methods**:
-   - Create custom type with key: `connector-stripe-tax-shipping`
+   - Create custom type with key: `connector-stripe-tax-shipping` (the default; overridable with
+     `CUSTOM_TYPE_SHIPPING_KEY`. Post-deploy creates it — `process-deploy-and-undeploy.md`)
    - Add field: `connectorStripeTax_TaxCode` (String, optional)
    - Assign to resource type: `shipping-method`
 
@@ -528,7 +506,8 @@ async buildShippingCost(cart, shippingInfo) {
 3. **Tax Code Assignment**:
    - Tax codes are optional - shipping methods can function without them
    - When tax code is not set, the system returns `null`
-   - The orchestrator handles `null` tax codes appropriately
+   - The orchestrator sends `null` tax codes to Stripe unchanged
+     (`tax-calculator/src/services/tax-orchestrator.service.js:277-280`)
 
 ### Environment Variables
 
@@ -538,19 +517,18 @@ No environment variables are required for this functionality. The system uses th
 
 - `process-category-taxcode-selection.md`: Product tax code selection process documentation
 - `process-ship-from-selection.md`: Ship-from address selection process documentation
-- `ship-from-tax-calculation-flow.md`: Complete tax calculation flow with shipping integration
+- `process-tax-orchestration.md`: Complete tax calculation flow with shipping integration
 
 ## Summary
 
-The process of shipping tax code selection is a straightforward system that:
+The process of shipping tax code selection is a system that:
 
 1. **Extracts shipping method ID** from shipping info (Single or Multiple mode)
 2. **Fetches shipping method** from commercetools API to access custom fields
 3. **Checks custom fields** for the tax code field `connectorStripeTax_TaxCode`
 4. **Returns tax code** if found, or `null` if not configured
-5. **Handles errors** gracefully with proper error logging and propagation
+5. **Propagates errors** with error logging
 6. **Supports both modes** (Single and Multiple shipping modes)
 7. **Uses single strategy** approach without fallback mechanisms
 
-This system ensures efficient, predictable, and maintainable shipping tax code resolution for accurate tax calculations in e-commerce platforms. The simplicity of the approach reflects the direct relationship between shipping methods and their tax codes, without the complexity of hierarchical resolution needed for products.
-
+This system provides predictable shipping tax code resolution for tax calculations, reflecting the direct relationship between shipping methods and their tax codes.

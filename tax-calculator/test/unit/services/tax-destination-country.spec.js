@@ -372,8 +372,9 @@ describe('SB3-218 — tax destination country comes from the delivery address', 
     // How the fix reaches carts that already exist. The re-apply path replays a stored
     // calculation without asking Stripe again, so a cart poisoned before the deploy would
     // otherwise keep its result for the rest of its life. Rather than mutating every cart at
-    // deploy time, a calculation is only replayed while it still belongs to where the order goes
-    // — and one stored before the fix records no destination at all.
+    // deploy time, a calculation is only replayed while it still belongs to where the order goes.
+    // Since SB3-238 (ADR-012) "where the order goes" is read from the retrieved calculation's own
+    // customer_details.address, at jurisdiction granularity — never from a cart custom field.
     const cartWithStoredCalculation = (fields) => ({
       id: 'cart-legacy',
       country: 'US',
@@ -386,23 +387,33 @@ describe('SB3-218 — tax destination country comes from the delivery address', 
       custom: { fields: { connectorStripeTax_calculationReferences: ['taxcalc_legacy'], ...fields } }
     });
 
-    it('recalculates instead of replaying a calculation that recorded no destination', async () => {
+    it('recalculates when the retrieved calculation records no usable destination', async () => {
+      // A calculation stored before SB3-218 was made against cart.country and echoes no
+      // customer_details Stripe would return as the real destination. Since SB3-238 the guard
+      // reads the destination from the calculation itself, so an unusable one cannot match the
+      // cart and is recalculated.
       const cart = cartWithStoredCalculation({});
+      stripeClient.tax.calculations.retrieve.mockResolvedValue({
+        id: 'taxcalc_legacy', line_items: { data: [{ reference: 'line-1', amount: 10000, amount_tax: 0, metadata: { cartId: 'cart-legacy' } }] }
+      });
 
       await service.reapplyExistingCalculation(cart);
 
-      expect(stripeClient.tax.calculations.retrieve).not.toHaveBeenCalled();
       expect(stripeClient.tax.calculations.create).toHaveBeenCalledTimes(1);
       expect(stripeClient.tax.calculations.create.mock.calls[0][0]
         .customer_details.address.country).toBe('ES');
     });
 
-    it('recalculates when the cart now delivers somewhere else', async () => {
-      const cart = cartWithStoredCalculation({ connectorStripeTax_destinationCountry: 'DE' });
+    it('recalculates when the retrieved calculation was made for another destination', async () => {
+      const cart = cartWithStoredCalculation({ connectorStripeTax_destinationCountry: 'ES' });
+      stripeClient.tax.calculations.retrieve.mockResolvedValue({
+        id: 'taxcalc_legacy',
+        customer_details: { address: { country: 'DE', city: 'Berlin', postal_code: '10115' } },
+        line_items: { data: [{ reference: 'line-1', amount: 10000, amount_tax: 0, metadata: { cartId: 'cart-legacy' } }] }
+      });
 
       await service.reapplyExistingCalculation(cart);
 
-      expect(stripeClient.tax.calculations.retrieve).not.toHaveBeenCalled();
       expect(stripeClient.tax.calculations.create).toHaveBeenCalledTimes(1);
     });
 
@@ -412,7 +423,10 @@ describe('SB3-218 — tax destination country comes from the delivery address', 
         id: 'taxcalc_legacy',
         amount_total: 12100,
         currency: 'eur',
-        line_items: { data: [] }
+        // Echoed response shape: Stripe returns state as null when the address has none, while the
+        // cart omits it — exercises the null-vs-undefined normalization (SB3-238 F1).
+        customer_details: { address: { country: 'ES', state: null, city: 'Madrid', postal_code: '28001' } },
+        line_items: { data: [{ reference: 'line-1', amount: 10000, amount_tax: 2100, metadata: { cartId: 'cart-legacy' } }] }
       });
       updateActionService.createLineItemActionsFromCalculation.mockReturnValue([]);
       updateActionService.createCartTotalTaxAction.mockReturnValue(null);
@@ -420,7 +434,7 @@ describe('SB3-218 — tax destination country comes from the delivery address', 
       await service.reapplyExistingCalculation(cart);
 
       expect(stripeClient.tax.calculations.retrieve).toHaveBeenCalledWith(
-        'taxcalc_legacy', expect.any(Object)
+        'taxcalc_legacy', { expand: ['line_items'] }, { timeout: 1500, maxNetworkRetries: 0 }
       );
       expect(stripeClient.tax.calculations.create).not.toHaveBeenCalled();
     });

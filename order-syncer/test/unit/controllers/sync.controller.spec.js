@@ -37,6 +37,11 @@ jest.mock('../../../src/extensions/stripe/clients/client.js', () => ({
   createTaxTransactions: jest.fn(),
   getTransactionFromTaxCalculation: jest.fn(),
   updatePaymentIntentMetadata: jest.fn(),
+  retrieveCalculation: jest.fn(),
+}));
+
+jest.mock('../../../src/validators/calculation-binding.validators.js', () => ({
+  partitionReferencesByOrderBinding: jest.fn(),
 }));
 
 import { logger } from '../../../src/utils/logger.util.js';
@@ -44,11 +49,12 @@ import { decodeToJson } from '../../../src/utils/decoder.util.js';
 import { doValidation } from '../../../src/validators/order-change.validators.js';
 import { getOrderWithPaymentInfo } from '../../../src/clients/query.client.js';
 import { updateOrderTaxTxn } from '../../../src/clients/update.client.js';
-import { 
-  createTaxTransactions, 
-  getTransactionFromTaxCalculation, 
-  updatePaymentIntentMetadata 
+import {
+  createTaxTransactions,
+  getTransactionFromTaxCalculation,
+  updatePaymentIntentMetadata
 } from '../../../src/extensions/stripe/clients/client.js';
+import { partitionReferencesByOrderBinding } from '../../../src/validators/calculation-binding.validators.js';
 
 describe('sync.controller.spec', () => {
   let mockRequest;
@@ -58,6 +64,9 @@ describe('sync.controller.spec', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+
+    // Default: every stored reference belongs to the order (binding is tested in its own spec).
+    partitionReferencesByOrderBinding.mockImplementation(async (refs) => ({ valid: refs, invalid: [] }));
 
     mockRequest = {
       method: 'POST',
@@ -528,6 +537,145 @@ describe('sync.controller.spec', () => {
       await syncHandler(mockRequest, mockResponse);
 
       expect(updatePaymentIntentMetadata).not.toHaveBeenCalled();
+      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
+    });
+  });
+
+  describe('syncHandler - calculation reference binding (SB3-238 AC-5)', () => {
+    const orderId = 'order-123';
+    const paymentIntentId = 'pi_123';
+
+    const orderWith = (refs) => ({
+      id: orderId,
+      custom: { fields: { [ORDER_TAX_FIELD_NAMES.CALCULATION_REFERENCES]: refs } },
+      paymentInfo: { payments: [{ obj: { interfaceId: paymentIntentId } }] },
+    });
+
+    beforeEach(() => {
+      mockRequest.body = { message: { data: 'encoded-base64-string' } };
+      decodeToJson.mockReturnValue({
+        notificationType: 'Message',
+        type: 'OrderCreated',
+        resource: { typeId: 'order', id: orderId },
+      });
+      doValidation.mockImplementation(() => {});
+    });
+
+    it('files only the references that belong to the order and flags the foreign one', async () => {
+      getOrderWithPaymentInfo.mockResolvedValue(orderWith(['calc_mine', 'calc_foreign']));
+      partitionReferencesByOrderBinding.mockResolvedValue({
+        valid: ['calc_mine'],
+        invalid: [{ ref: 'calc_foreign', reason: 'cartId-mismatch' }],
+      });
+      getTransactionFromTaxCalculation.mockResolvedValue({ id: 'tax_mine' });
+      updateOrderTaxTxn.mockResolvedValue({ body: {} });
+
+      await syncHandler(mockRequest, mockResponse);
+
+      // One valid reference → single-calc path, foreign one never filed.
+      expect(getTransactionFromTaxCalculation).toHaveBeenCalledWith('calc_mine', orderId, paymentIntentId);
+      expect(createTaxTransactions).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('calc_foreign'));
+    });
+
+    it('files nothing and logs an error when no reference belongs to the order', async () => {
+      getOrderWithPaymentInfo.mockResolvedValue(orderWith(['calc_foreign']));
+      partitionReferencesByOrderBinding.mockResolvedValue({
+        valid: [],
+        invalid: [{ ref: 'calc_foreign', reason: 'address-mismatch' }],
+      });
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(getTransactionFromTaxCalculation).not.toHaveBeenCalled();
+      expect(createTaxTransactions).not.toHaveBeenCalled();
+      expect(updateOrderTaxTxn).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalled();
+      // Message is acknowledged (no throw → no redelivery loop).
+      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
+    });
+
+    it.each([
+      ['the provider status (5xx)', Object.assign(new Error('Service unavailable'), { statusCode: 503 }), 503],
+      ['the provider status (429)', Object.assign(new Error('Too many requests'), { statusCode: 429 }), 429],
+      ['500 when the failure has no status (network)', new Error('socket hang up'), HTTP_STATUS_SERVER_ERROR],
+    ])('answers %s and files nothing when checking a reference fails transiently, so Pub/Sub redelivers', async (_name, error, status) => {
+      getOrderWithPaymentInfo.mockResolvedValue(orderWith(['calc_mine', 'calc_other']));
+      partitionReferencesByOrderBinding.mockRejectedValue(error);
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(getTransactionFromTaxCalculation).not.toHaveBeenCalled();
+      expect(createTaxTransactions).not.toHaveBeenCalled();
+      expect(updateOrderTaxTxn).not.toHaveBeenCalled();
+      expect(responseStatusSpy).toHaveBeenCalledWith(status);
+      expect(responseStatusSpy).not.toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
+      expect(responseStatusSpy).not.toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_ACCEPTED);
+    });
+
+    // SB3-238 round 4: the list is shopper-written. Above the bound nothing is retrieved, so a rate
+    // limit cannot make Pub/Sub redeliver an unbounded list; the sale is logged for manual filing.
+    it('checks and files nothing, and logs an error, when an order carries more references than the bound', async () => {
+      const refs = Array.from({ length: 101 }, (_, i) => `calc_${i}`);
+      getOrderWithPaymentInfo.mockResolvedValue(orderWith(refs));
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(partitionReferencesByOrderBinding).not.toHaveBeenCalled();
+      expect(getTransactionFromTaxCalculation).not.toHaveBeenCalled();
+      expect(createTaxTransactions).not.toHaveBeenCalled();
+      expect(updateOrderTaxTxn).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('101 calculation references exceed the bound of 100'));
+      expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
+    });
+
+    it('removes repeated ids before applying the bound', async () => {
+      const unique = Array.from({ length: 100 }, (_, i) => `calc_${i}`);
+      getOrderWithPaymentInfo.mockResolvedValue(orderWith([...unique, 'calc_0'])); // 101 entries, 100 distinct
+      createTaxTransactions.mockResolvedValue([]);
+      updateOrderTaxTxn.mockResolvedValue({ body: {} });
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(partitionReferencesByOrderBinding).toHaveBeenCalledWith(unique, expect.anything());
+      expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('exceed the bound'));
+    });
+
+    it('still checks an order carrying exactly the bound of references', async () => {
+      const refs = Array.from({ length: 100 }, (_, i) => `calc_${i}`);
+      getOrderWithPaymentInfo.mockResolvedValue(orderWith(refs));
+      createTaxTransactions.mockResolvedValue([]);
+      updateOrderTaxTxn.mockResolvedValue({ body: {} });
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(partitionReferencesByOrderBinding).toHaveBeenCalledWith(refs, expect.anything());
+    });
+
+    // SB3-238 round 4: a repeated id would be filed twice; the provider refuses the second (a
+    // reference is unique), the message redelivers and fails again at the same place, forever.
+    it('files a repeated reference once', async () => {
+      getOrderWithPaymentInfo.mockResolvedValue(orderWith(['calc_a', 'calc_a']));
+      getTransactionFromTaxCalculation.mockResolvedValue({ id: 'tax_a' });
+      updateOrderTaxTxn.mockResolvedValue({ body: {} });
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(partitionReferencesByOrderBinding).toHaveBeenCalledWith(['calc_a'], expect.anything());
+      expect(createTaxTransactions).not.toHaveBeenCalled();
+      expect(getTransactionFromTaxCalculation).toHaveBeenCalledTimes(1);
+      expect(getTransactionFromTaxCalculation).toHaveBeenCalledWith('calc_a', orderId, paymentIntentId);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('1 repeated calculation reference(s) dropped'));
+    });
+
+    it('logs an error (not a silent skip) when a paid order has an emptied reference list', async () => {
+      getOrderWithPaymentInfo.mockResolvedValue(orderWith([]));
+
+      await syncHandler(mockRequest, mockResponse);
+
+      expect(partitionReferencesByOrderBinding).not.toHaveBeenCalled();
+      expect(createTaxTransactions).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalled();
       expect(responseStatusSpy).toHaveBeenCalledWith(HTTP_STATUS_SUCCESS_NO_CONTENT);
     });
   });
